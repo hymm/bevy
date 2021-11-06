@@ -5,6 +5,7 @@ use crate::{
     change_detection::Ticks,
     component::{Component, ComponentId, ComponentTicks, Components},
     entity::{Entities, Entity},
+    non_ecs_data::{ NonEcsDataId, NON_SEND_DATA_ID},
     query::{
         FilterFetch, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyFetch, WorldQuery,
     },
@@ -771,7 +772,7 @@ unsafe impl<T: 'static> SystemParamState for NonSendState<T> {
     type Config = ();
 
     fn init(world: &mut World, system_meta: &mut SystemMeta, _config: Self::Config) -> Self {
-        system_meta.set_non_send();
+        system_meta.non_ecs_data_access.add_write(NonEcsDataId::new(NON_SEND_DATA_ID));
 
         let component_id = world.initialize_non_send_resource::<T>();
         let combined_access = system_meta.component_access_set.combined_access_mut();
@@ -887,7 +888,7 @@ unsafe impl<T: 'static> SystemParamState for NonSendMutState<T> {
     type Config = ();
 
     fn init(world: &mut World, system_meta: &mut SystemMeta, _config: Self::Config) -> Self {
-        system_meta.set_non_send();
+        system_meta.non_ecs_data_access.add_write(NonEcsDataId::new(NON_SEND_DATA_ID));
 
         let component_id = world.initialize_non_send_resource::<T>();
         let combined_access = system_meta.component_access_set.combined_access_mut();
