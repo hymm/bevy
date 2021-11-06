@@ -3,6 +3,7 @@ use crate::{
     query::Access,
     schedule::{ParallelSystemContainer, ParallelSystemExecutor},
     world::World,
+    non_ecs_data::NonEcsDataId,
 };
 use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
@@ -10,6 +11,7 @@ use fixedbitset::FixedBitSet;
 
 #[cfg(test)]
 use SchedulingEvent::*;
+
 
 struct SystemSchedulingMetadata {
     /// Used to signal the system's task to start the system.
@@ -25,6 +27,8 @@ struct SystemSchedulingMetadata {
     dependencies_now: usize,
     /// Archetype-component access information.
     archetype_component_access: Access<ArchetypeComponentId>,
+    /// Non-Ecs Data access information
+    non_ecs_data_access: Access<NonEcsDataId>,
     /// Whether or not this system is send-able
     is_send: bool,
 }
@@ -48,6 +52,8 @@ pub struct ParallelExecutor {
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     active_archetype_component_access: Access<ArchetypeComponentId>,
+    /// Compound non ecs data access information of currently running systems.
+    active_non_ecs_data_access: Access<NonEcsDataId>,
     /// Scratch space to avoid reallocating a vector when updating dependency counters.
     dependants_scratch: Vec<usize>,
     #[cfg(test)]
@@ -67,6 +73,7 @@ impl Default for ParallelExecutor {
             non_send_running: false,
             should_run: Default::default(),
             active_archetype_component_access: Default::default(),
+            active_non_ecs_data_access: Default::default(),
             dependants_scratch: Default::default(),
             #[cfg(test)]
             events_sender: None,
@@ -94,6 +101,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
                 dependencies_now: 0,
                 is_send: system.is_send(),
                 archetype_component_access: Default::default(),
+                non_ecs_data_access: Default::default(),
             });
         }
         // Populate the dependants lists in the scheduling metadata.
@@ -222,6 +230,7 @@ impl ParallelExecutor {
             && system_data
                 .archetype_component_access
                 .is_compatible(&self.active_archetype_component_access)
+            && system_data.non_ecs_data_access.is_compatible(&self.active_non_ecs_data_access)
     }
 
     /// Starts all non-conflicting queued systems, moves them from `queued` to `running`,
@@ -253,6 +262,8 @@ impl ParallelExecutor {
                 // Add this system's access information to the active access information.
                 self.active_archetype_component_access
                     .extend(&system_metadata.archetype_component_access);
+                self.active_non_ecs_data_access
+                    .extend(&system_metadata.non_ecs_data_access);
             }
         }
         #[cfg(test)]
@@ -280,9 +291,12 @@ impl ParallelExecutor {
     /// running systems' access information.
     fn rebuild_active_access(&mut self) {
         self.active_archetype_component_access.clear();
+        self.active_non_ecs_data_access.clear();
         for index in self.running.ones() {
             self.active_archetype_component_access
                 .extend(&self.system_metadata[index].archetype_component_access);
+
+            self.active_non_ecs_data_access.extend(&self.system_metadata[index].non_ecs_data_access);
         }
     }
 

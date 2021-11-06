@@ -11,6 +11,7 @@ pub mod schedule;
 pub mod storage;
 pub mod system;
 pub mod world;
+pub mod non_ecs_data;
 
 /// Most commonly used re-exported types.
 pub mod prelude {
