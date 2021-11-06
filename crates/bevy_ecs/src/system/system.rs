@@ -1,11 +1,6 @@
 use bevy_utils::tracing::warn;
 
-use crate::{
-    archetype::{Archetype, ArchetypeComponentId},
-    component::ComponentId,
-    query::Access,
-    world::World,
-};
+use crate::{archetype::{Archetype, ArchetypeComponentId}, component::ComponentId, non_ecs_data::NonEcsDataId, query::Access, world::World};
 use std::borrow::Cow;
 
 /// An ECS system that can be added to a [Schedule](crate::schedule::Schedule)
@@ -32,6 +27,8 @@ pub trait System: Send + Sync + 'static {
     fn component_access(&self) -> &Access<ComponentId>;
     /// Returns the system's archetype component [`Access`].
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId>;
+    /// Returns the non ecs data ['Access]
+    fn non_ecs_data_access(&self) -> &Access<NonEcsDataId>;
     /// Returns true if the system is [`Send`].
     fn is_send(&self) -> bool;
     /// Runs the system with the given input in the world. Unlike [`System::run`], this function

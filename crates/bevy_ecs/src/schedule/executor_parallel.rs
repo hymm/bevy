@@ -101,7 +101,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
                 dependencies_now: 0,
                 is_send: system.is_send(),
                 archetype_component_access: Default::default(),
-                non_ecs_data_access: Default::default(),
+                non_ecs_data_access: system.non_ecs_data_access().clone(),
             });
         }
         // Populate the dependants lists in the scheduling metadata.

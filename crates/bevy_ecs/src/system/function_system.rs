@@ -2,6 +2,7 @@ use crate::{
     archetype::{Archetype, ArchetypeComponentId, ArchetypeGeneration, ArchetypeId},
     component::ComponentId,
     query::{Access, FilteredAccessSet},
+    non_ecs_data::NonEcsDataId,
     system::{
         check_system_change_tick, ReadOnlySystemParamFetch, System, SystemParam, SystemParamFetch,
         SystemParamItem, SystemParamState,
@@ -16,6 +17,7 @@ pub struct SystemMeta {
     pub(crate) name: Cow<'static, str>,
     pub(crate) component_access_set: FilteredAccessSet<ComponentId>,
     pub(crate) archetype_component_access: Access<ArchetypeComponentId>,
+    pub(crate) non_ecs_data_access: Access<NonEcsDataId>,
     // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
     // SystemParams from overriding each other
     is_send: bool,
@@ -27,6 +29,7 @@ impl SystemMeta {
         Self {
             name: std::any::type_name::<T>().into(),
             archetype_component_access: Access::default(),
+            non_ecs_data_access: Access::default(),
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             last_change_tick: 0,
@@ -429,6 +432,11 @@ where
     #[inline]
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
         &self.system_meta.archetype_component_access
+    }
+
+    #[inline]
+    fn non_ecs_data_access(&self) -> &Access<NonEcsDataId> {
+        &self.system_meta.non_ecs_data_access
     }
 
     #[inline]

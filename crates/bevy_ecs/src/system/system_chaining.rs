@@ -1,10 +1,4 @@
-use crate::{
-    archetype::{Archetype, ArchetypeComponentId},
-    component::ComponentId,
-    query::Access,
-    system::{IntoSystem, System},
-    world::World,
-};
+use crate::{archetype::{Archetype, ArchetypeComponentId}, component::ComponentId, non_ecs_data::NonEcsDataId, query::Access, system::{IntoSystem, System}, world::World};
 use std::borrow::Cow;
 
 /// A [`System`] that chains two systems together, creating a new system that routes the output of
@@ -50,6 +44,7 @@ pub struct ChainSystem<SystemA, SystemB> {
     name: Cow<'static, str>,
     component_access: Access<ComponentId>,
     archetype_component_access: Access<ArchetypeComponentId>,
+    non_ecs_data_access: Access<NonEcsDataId>,
 }
 
 impl<SystemA: System, SystemB: System<In = SystemA::Out>> System for ChainSystem<SystemA, SystemB> {
@@ -72,6 +67,10 @@ impl<SystemA: System, SystemB: System<In = SystemA::Out>> System for ChainSystem
 
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
         &self.archetype_component_access
+    }
+
+    fn non_ecs_data_access(&self) -> &Access<NonEcsDataId> {
+        &self.non_ecs_data_access
     }
 
     fn component_access(&self) -> &Access<ComponentId> {
@@ -99,6 +98,11 @@ impl<SystemA: System, SystemB: System<In = SystemA::Out>> System for ChainSystem
             .extend(self.system_a.component_access());
         self.component_access
             .extend(self.system_b.component_access());
+
+        self.non_ecs_data_access
+            .extend(self.system_a.non_ecs_data_access());
+        self.non_ecs_data_access
+            .extend(self.system_b.non_ecs_data_access());
     }
 
     fn check_change_tick(&mut self, change_tick: u32) {
@@ -137,6 +141,7 @@ where
             system_a,
             system_b,
             archetype_component_access: Default::default(),
+            non_ecs_data_access: Default::default(),
             component_access: Default::default(),
         }
     }
