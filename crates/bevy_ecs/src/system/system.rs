@@ -1,6 +1,12 @@
 use bevy_utils::tracing::warn;
 
-use crate::{archetype::{Archetype, ArchetypeComponentId}, component::ComponentId, non_ecs_data::NonEcsDataId, query::Access, world::World};
+use crate::{
+    archetype::{Archetype, ArchetypeComponentId},
+    component::ComponentId,
+    non_ecs_data::NonEcsDataId,
+    query::Access,
+    world::World,
+};
 use std::borrow::Cow;
 
 /// An ECS system that can be added to a [Schedule](crate::schedule::Schedule)

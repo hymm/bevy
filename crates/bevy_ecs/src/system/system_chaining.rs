@@ -1,4 +1,11 @@
-use crate::{archetype::{Archetype, ArchetypeComponentId}, component::ComponentId, non_ecs_data::NonEcsDataId, query::Access, system::{IntoSystem, System}, world::World};
+use crate::{
+    archetype::{Archetype, ArchetypeComponentId},
+    component::ComponentId,
+    non_ecs_data::NonEcsDataId,
+    query::Access,
+    system::{IntoSystem, System},
+    world::World,
+};
 use std::borrow::Cow;
 
 /// A [`System`] that chains two systems together, creating a new system that routes the output of

@@ -1,9 +1,9 @@
 use crate::{
     archetype::{ArchetypeComponentId, ArchetypeGeneration},
+    non_ecs_data::{NonEcsDataId, NON_SEND_DATA_ID},
     query::Access,
     schedule::{ParallelSystemContainer, ParallelSystemExecutor},
     world::World,
-    non_ecs_data::{NonEcsDataId, NON_SEND_DATA_ID},
 };
 use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
@@ -11,7 +11,6 @@ use fixedbitset::FixedBitSet;
 
 #[cfg(test)]
 use SchedulingEvent::*;
-
 
 struct SystemSchedulingMetadata {
     /// Used to signal the system's task to start the system.
@@ -201,7 +200,10 @@ impl ParallelExecutor {
                         .await
                         .unwrap_or_else(|error| unreachable!(error));
                 };
-                if system_data.non_ecs_data_access.has_write(NonEcsDataId::new(NON_SEND_DATA_ID)) {
+                if system_data
+                    .non_ecs_data_access
+                    .has_write(NonEcsDataId::new(NON_SEND_DATA_ID))
+                {
                     scope.spawn_local(task);
                 } else {
                     scope.spawn(task);
@@ -221,9 +223,11 @@ impl ParallelExecutor {
         let system_data = &self.system_metadata[index];
         // Non-send systems are considered conflicting with each other.
         system_data
-                .archetype_component_access
-                .is_compatible(&self.active_archetype_component_access)
-            && system_data.non_ecs_data_access.is_compatible(&self.active_non_ecs_data_access)
+            .archetype_component_access
+            .is_compatible(&self.active_archetype_component_access)
+            && system_data
+                .non_ecs_data_access
+                .is_compatible(&self.active_non_ecs_data_access)
     }
 
     /// Starts all non-conflicting queued systems, moves them from `queued` to `running`,
@@ -249,7 +253,7 @@ impl ParallelExecutor {
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
                 self.running.set(index, true);
-                
+
                 // Add this system's access information to the active access information.
                 self.active_archetype_component_access
                     .extend(&system_metadata.archetype_component_access);
@@ -284,7 +288,8 @@ impl ParallelExecutor {
             self.active_archetype_component_access
                 .extend(&self.system_metadata[index].archetype_component_access);
 
-            self.active_non_ecs_data_access.extend(&self.system_metadata[index].non_ecs_data_access);
+            self.active_non_ecs_data_access
+                .extend(&self.system_metadata[index].non_ecs_data_access);
         }
     }
 
