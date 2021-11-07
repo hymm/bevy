@@ -1,5 +1,13 @@
 use crate::Time;
-use bevy_ecs::{archetype::{Archetype, ArchetypeComponentId}, component::ComponentId, non_ecs_data::NonEcsDataId, query::Access, schedule::ShouldRun, system::{ConfigurableSystem, IntoSystem, Local, Res, ResMut, System}, world::World};
+use bevy_ecs::{
+    archetype::{Archetype, ArchetypeComponentId},
+    component::ComponentId,
+    non_ecs_data::NonEcsDataId,
+    query::Access,
+    schedule::ShouldRun,
+    system::{ConfigurableSystem, IntoSystem, Local, Res, ResMut, System},
+    world::World,
+};
 use bevy_utils::HashMap;
 use std::borrow::Cow;
 
@@ -155,10 +163,6 @@ impl System for FixedTimestep {
 
     fn component_access(&self) -> &Access<ComponentId> {
         self.internal_system.component_access()
-    }
-
-    fn is_send(&self) -> bool {
-        self.internal_system.is_send()
     }
 
     unsafe fn run_unsafe(&mut self, _input: (), world: &World) -> ShouldRun {

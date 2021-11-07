@@ -18,9 +18,6 @@ pub struct SystemMeta {
     pub(crate) component_access_set: FilteredAccessSet<ComponentId>,
     pub(crate) archetype_component_access: Access<ArchetypeComponentId>,
     pub(crate) non_ecs_data_access: Access<NonEcsDataId>,
-    // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
-    // SystemParams from overriding each other
-    is_send: bool,
     pub(crate) last_change_tick: u32,
 }
 
@@ -31,25 +28,9 @@ impl SystemMeta {
             archetype_component_access: Access::default(),
             non_ecs_data_access: Access::default(),
             component_access_set: FilteredAccessSet::default(),
-            is_send: true,
             last_change_tick: 0,
         }
     }
-
-    /// Returns true if the system is [`Send`].
-    #[inline]
-    pub fn is_send(&self) -> bool {
-        self.is_send
-    }
-
-    /// Sets the system to be not [`Send`].
-    ///
-    /// This is irreversible.
-    #[inline]
-    pub fn set_non_send(&mut self) {
-        self.is_send = false;
-    }
-
     #[inline]
     pub(crate) fn check_change_tick(&mut self, change_tick: u32) {
         check_system_change_tick(&mut self.last_change_tick, change_tick, self.name.as_ref());
@@ -437,11 +418,6 @@ where
     #[inline]
     fn non_ecs_data_access(&self) -> &Access<NonEcsDataId> {
         &self.system_meta.non_ecs_data_access
-    }
-
-    #[inline]
-    fn is_send(&self) -> bool {
-        self.system_meta.is_send
     }
 
     #[inline]

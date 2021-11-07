@@ -438,10 +438,6 @@ impl System for RunOnce {
         &self.non_ecs_data_access
     }
 
-    fn is_send(&self) -> bool {
-        true
-    }
-
     unsafe fn run_unsafe(&mut self, _input: (), _world: &World) -> ShouldRun {
         if self.ran {
             ShouldRun::No
