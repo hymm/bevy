@@ -38,6 +38,10 @@ impl ExclusiveSystemContainer {
         }
     }
 
+    pub(super) fn system(&self) -> &Box<dyn ExclusiveSystem> {
+        &self.system
+    }
+
     pub(super) fn system_mut(&mut self) -> &mut Box<dyn ExclusiveSystem> {
         &mut self.system
     }

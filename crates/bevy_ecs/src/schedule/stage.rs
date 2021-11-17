@@ -8,13 +8,13 @@ use crate::{
         RunCriteriaContainer, RunCriteriaDescriptor, RunCriteriaDescriptorOrLabel,
         RunCriteriaInner, ShouldRun, SingleThreadedExecutor, SystemSet,
     },
-    system::{BoxedExclusiveSystem, BoxedSystem, InsertionPoint},
+    system::{BoxedExclusiveSystem, BoxedSystem},
     world::{World, WorldId},
 };
 use bevy_utils::{tracing::info, HashMap, HashSet};
 use downcast_rs::{impl_downcast, Downcast};
 use fixedbitset::FixedBitSet;
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 use super::system_container::SystemContainer;
 use super::ExclusiveSystemContainer;
@@ -26,6 +26,47 @@ pub trait Stage: Downcast + Send + Sync {
 }
 
 impl_downcast!(Stage);
+
+struct TempGraphNode {
+    name: Cow<'static, str>,
+    pub config: SystemConfig,
+}
+
+impl TempGraphNode {
+    fn new(name: Cow<'static, str>, config: &SystemConfig) -> Self {
+        let mut c = SystemConfig::default();
+        c.labels
+            .extend(config.labels.iter().map(|label| label.dyn_clone()));
+        c.before
+            .extend(config.before.iter().map(|label| label.dyn_clone()));
+        c.after
+            .extend(config.after.iter().map(|label| label.dyn_clone()));
+        TempGraphNode {
+            name: name.clone(),
+            config: c,
+        }
+    }
+}
+
+impl GraphNode for TempGraphNode {
+    type Label = BoxedSystemLabel;
+
+    fn name(&self) -> Cow<'static, str> {
+        self.name.clone()
+    }
+
+    fn labels(&self) -> &[BoxedSystemLabel] {
+        &self.config.labels
+    }
+
+    fn before(&self) -> &[BoxedSystemLabel] {
+        &self.config.before
+    }
+
+    fn after(&self) -> &[BoxedSystemLabel] {
+        &self.config.after
+    }
+}
 
 /// When this resource is present in the `App`'s `Resources`,
 /// each `SystemStage` will log a report containing
@@ -401,11 +442,7 @@ impl SystemStage {
         // This assertion is there to document that a maximum of `u32::MAX / 8` systems should be
         // added to a stage to guarantee that change detection has no false positive, but it
         // can be circumvented using exclusive or chained systems
-        assert!(
-            self.exclusive.len()
-                + self.parallel.len()
-                < (u32::MAX / 8) as usize
-        );
+        assert!(self.exclusive.len() + self.parallel.len() < (u32::MAX / 8) as usize);
         debug_assert!(
             self.uninitialized_run_criteria.is_empty()
                 && self.uninitialized_parallel.is_empty()
@@ -444,14 +481,13 @@ impl SystemStage {
         // TODO: need to combine these so that process systems orders parallel systems and
         // exclusive systems together
         unwrap_dependency_cycle_error(
-            process_systems(&mut self.parallel, &run_criteria_labels),
+            process_systems(
+                &mut self.parallel,
+                &mut self.exclusive,
+                &run_criteria_labels,
+            ),
             &self.parallel,
             "parallel systems",
-        );
-        unwrap_dependency_cycle_error(
-            process_systems(&mut self.exclusive, &run_criteria_labels),
-            &self.exclusive,
-            "exclusive systems",
         );
     }
 
@@ -485,9 +521,7 @@ impl SystemStage {
         // TODO: might need to combine these two together.
         let parallel = find_ambiguities(&self.parallel);
         let exclusive = find_ambiguities(&self.exclusive);
-        if !(parallel.is_empty()
-            && exclusive.is_empty())
-        {
+        if !(parallel.is_empty() && exclusive.is_empty()) {
             let mut string = "Execution order ambiguities detected, you might want to \
                     add an explicit dependency relation between some of these systems:\n"
                 .to_owned();
@@ -497,12 +531,7 @@ impl SystemStage {
             }
             if !exclusive.is_empty() {
                 writeln!(string, " * Exclusive systems at start of stage:").unwrap();
-                write_display_names_of_pairs(
-                    &mut string,
-                    &self.exclusive,
-                    exclusive,
-                    world,
-                );
+                write_display_names_of_pairs(&mut string, &self.exclusive, exclusive, world);
             }
             info!("{}", string);
         }
@@ -593,14 +622,28 @@ impl SystemStage {
 /// Sorts given system containers topologically, populates their resolved dependencies
 /// and run criteria.
 fn process_systems(
-    systems: &mut Vec<impl SystemContainer>,
+    parallel: &mut Vec<ParallelSystemContainer>,
+    exclusive: &mut Vec<ExclusiveSystemContainer>,
     run_criteria_labels: &HashMap<BoxedRunCriteriaLabel, usize>,
 ) -> Result<(), DependencyGraphError<HashSet<BoxedSystemLabel>>> {
-    let mut graph = graph_utils::build_dependency_graph(systems);
+    // TODO: make this not clone
+    let mut systems = Vec::<TempGraphNode>::new();
+    systems.extend(
+        parallel
+            .iter()
+            .map(|system| TempGraphNode::new(system.name(), system.system().config())),
+    );
+    systems.extend(
+        exclusive
+            .iter()
+            .map(|system| TempGraphNode::new(system.name(), system.system().config())),
+    );
+    let mut graph = graph_utils::build_dependency_graph(&systems);
     let order = graph_utils::topological_order(&graph)?;
     let mut order_inverted = order.iter().enumerate().collect::<Vec<_>>();
     order_inverted.sort_unstable_by_key(|(_, &key)| key);
-    for (index, container) in systems.iter_mut().enumerate() {
+
+    for (index, container) in parallel.iter_mut().enumerate() {
         if let Some(index) = container.run_criteria_label().map(|label| {
             *run_criteria_labels
                 .get(label)
@@ -616,9 +659,9 @@ fn process_systems(
                 .map(|(index, _)| order_inverted[index].0),
         );
     }
-    let mut temp = systems.drain(..).map(Some).collect::<Vec<_>>();
+    let mut temp = parallel.drain(..).map(Some).collect::<Vec<_>>();
     for index in order {
-        systems.push(temp[index].take().unwrap());
+        parallel.push(temp[index].take().unwrap());
     }
     Ok(())
 }
