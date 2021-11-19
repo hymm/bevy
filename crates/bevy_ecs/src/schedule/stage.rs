@@ -643,6 +643,8 @@ fn process_systems(
     let mut order_inverted = order.iter().enumerate().collect::<Vec<_>>();
     order_inverted.sort_unstable_by_key(|(_, &key)| key);
 
+    let num_parallel = parallel.iter().len();
+
     for (index, container) in parallel.iter_mut().enumerate() {
         if let Some(index) = container.run_criteria_label().map(|label| {
             *run_criteria_labels
@@ -660,8 +662,32 @@ fn process_systems(
         );
     }
     let mut temp = parallel.drain(..).map(Some).collect::<Vec<_>>();
-    for index in order {
-        parallel.push(temp[index].take().unwrap());
+    for index in &order[..num_parallel] {
+        parallel.push(temp[*index].take().unwrap());
+    }
+
+    for (index, container) in exclusive.iter_mut().enumerate() {
+        if let Some(index) = container.run_criteria_label().map(|label| {
+            *run_criteria_labels
+                .get(label)
+                .unwrap_or_else(|| panic!("No run criteria with label {:?} found.", label))
+        }) {
+            container.set_run_criteria(index);
+        }
+
+        let index = index + num_parallel;
+        container.set_dependencies(
+            graph
+                .get_mut(&index)
+                .unwrap()
+                .drain()
+                .map(|(index, _)| order_inverted[index].0),
+        );
+    }
+    let mut temp = exclusive.drain(..).map(Some).collect::<Vec<_>>();
+    for index in &order[num_parallel..] {
+        let index = *index - num_parallel;
+        exclusive.push(temp[index].take().unwrap());
     }
     Ok(())
 }
