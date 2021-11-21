@@ -26,6 +26,7 @@ pub(super) struct ExclusiveSystemContainer {
     pub(super) run_criteria_index: Option<usize>,
     pub(super) run_criteria_label: Option<BoxedRunCriteriaLabel>,
     dependencies: Vec<usize>,
+    blocking_dependencies: Vec<usize>,
 }
 
 impl ExclusiveSystemContainer {
@@ -35,6 +36,7 @@ impl ExclusiveSystemContainer {
             run_criteria_index: None,
             run_criteria_label: None,
             dependencies: Vec::new(),
+            blocking_dependencies: Vec::new(),
         }
     }
 
@@ -44,6 +46,15 @@ impl ExclusiveSystemContainer {
 
     pub(super) fn system_mut(&mut self) -> &mut Box<dyn ExclusiveSystem> {
         &mut self.system
+    }
+
+    pub(crate) fn blocking_dependencies(&self) -> &[usize] {
+        &self.blocking_dependencies
+    }
+
+    pub(crate) fn set_blocking_dependencies(&mut self, dependencies: impl IntoIterator<Item = usize>) {
+        self.dependencies.clear();
+        self.dependencies.extend(dependencies);
     }
 }
 
@@ -104,6 +115,7 @@ pub struct ParallelSystemContainer {
     pub(crate) run_criteria_label: Option<BoxedRunCriteriaLabel>,
     pub(crate) should_run: bool,
     dependencies: Vec<usize>,
+    blocking_dependencies: Vec<usize>,
 }
 
 unsafe impl Send for ParallelSystemContainer {}
@@ -118,6 +130,7 @@ impl ParallelSystemContainer {
             run_criteria_index: None,
             run_criteria_label: None,
             dependencies: Vec::new(),
+            blocking_dependencies: Vec::new(),
         }
     }
 
@@ -147,6 +160,15 @@ impl ParallelSystemContainer {
 
     pub fn dependencies(&self) -> &[usize] {
         &self.dependencies
+    }
+
+    pub fn blocking_dependencies(&self) -> &[usize] {
+        &self.blocking_dependencies
+    }
+
+    pub fn set_blocking_dependencies(&mut self, dependencies: impl IntoIterator<Item = usize>) {
+        self.blocking_dependencies.clear();
+        self.blocking_dependencies.extend(dependencies);
     }
 }
 

@@ -643,6 +643,7 @@ fn process_systems(
     let mut order_inverted = order.iter().enumerate().collect::<Vec<_>>();
     order_inverted.sort_unstable_by_key(|(_, &key)| key);
 
+    // TODO: add blocking dependencies
     let num_parallel = parallel.iter().len();
 
     for (index, container) in parallel.iter_mut().enumerate() {
@@ -659,6 +660,21 @@ fn process_systems(
                 .unwrap()
                 .drain()
                 .map(|(index, _)| order_inverted[index].0),
+        );
+
+
+        container.set_blocking_dependencies(
+            graph
+                .get_mut(&index)
+                .unwrap()
+                .drain()
+                .filter_map(|(index, _)| {
+                    if index >= num_parallel {
+                        Some(order_inverted[index].0)
+                    } else {
+                        None
+                    }
+                })
         );
     }
     let mut temp = parallel.drain(..).map(Some).collect::<Vec<_>>();
@@ -682,6 +698,20 @@ fn process_systems(
                 .unwrap()
                 .drain()
                 .map(|(index, _)| order_inverted[index].0),
+        );
+        
+        container.set_blocking_dependencies(
+            graph
+                .get_mut(&index)
+                .unwrap()
+                .drain()
+                .filter_map(|(index, _)| {
+                    if index < num_parallel {
+                        Some(order_inverted[index].0)
+                    } else {
+                        None
+                    }
+                })
         );
     }
     let mut temp = exclusive.drain(..).map(Some).collect::<Vec<_>>();
