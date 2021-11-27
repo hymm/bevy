@@ -11,7 +11,7 @@ use fixedbitset::FixedBitSet;
 #[cfg(test)]
 use SchedulingEvent::*;
 
-struct SystemSchedulingMetadata {
+pub struct SystemSchedulingMetadata {
     /// Used to signal the system's task to start the system.
     start_sender: Sender<()>,
     /// Receives the signal to start the system.
@@ -19,10 +19,15 @@ struct SystemSchedulingMetadata {
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
     dependants: Vec<usize>,
+    blocking_dependants: Vec<usize>,
     /// Total amount of dependencies this system has.
     dependencies_total: usize,
     /// Amount of unsatisfied dependencies, when it reaches 0 the system is queued to be started.
     dependencies_now: usize,
+    /// Total amount of blocking dependencies this system has.
+    blocking_dependencies_total: usize,
+    /// Amount of unsatisfied blocking dependencies, when it reaches 0 the system is queued in the next phase
+    blocking_dependencies_now: usize,
     /// Archetype-component access information.
     archetype_component_access: Access<ArchetypeComponentId>,
     /// Whether or not this system is send-able
@@ -50,6 +55,7 @@ pub struct ParallelExecutor {
     active_archetype_component_access: Access<ArchetypeComponentId>,
     /// Scratch space to avoid reallocating a vector when updating dependency counters.
     dependants_scratch: Vec<usize>,
+    blocking_dependants_scratch: Vec<usize>,
     #[cfg(test)]
     events_sender: Option<Sender<SchedulingEvent>>,
 }
@@ -68,6 +74,7 @@ impl Default for ParallelExecutor {
             should_run: Default::default(),
             active_archetype_component_access: Default::default(),
             dependants_scratch: Default::default(),
+            blocking_dependants_scratch: Default::default(),
             #[cfg(test)]
             events_sender: None,
         }
@@ -83,15 +90,17 @@ impl ParallelSystemExecutor for ParallelExecutor {
 
         // Construct scheduling data for systems.
         for container in systems.iter() {
-            let dependencies_total = container.dependencies().len();
             let system = container.system();
             let (start_sender, start_receiver) = async_channel::bounded(1);
             self.system_metadata.push(SystemSchedulingMetadata {
                 start_sender,
                 start_receiver,
                 dependants: vec![],
-                dependencies_total,
+                blocking_dependants: vec![],
+                dependencies_total: container.dependencies().len(),
                 dependencies_now: 0,
+                blocking_dependencies_total: container.blocking_dependencies().len(),
+                blocking_dependencies_now: 0,
                 is_send: system.is_send(),
                 archetype_component_access: Default::default(),
             });
@@ -100,6 +109,10 @@ impl ParallelSystemExecutor for ParallelExecutor {
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
                 self.system_metadata[*dependency].dependants.push(dependant);
+            }
+
+            for dependency in container.blocking_dependencies() {
+                self.system_metadata[*dependency].blocking_dependants.push(dependant);
             }
         }
     }
@@ -237,6 +250,7 @@ impl ParallelExecutor {
             let system_metadata = &self.system_metadata[index];
             if !self.should_run[index] {
                 self.dependants_scratch.extend(&system_metadata.dependants);
+                self.blocking_dependants_scratch.extend(&system_metadata.blocking_dependants);
             } else if self.can_start_now(index) {
                 #[cfg(test)]
                 {
@@ -290,6 +304,13 @@ impl ParallelExecutor {
     /// Drains `dependants_scratch`, decrementing dependency counters and enqueueing any
     /// systems that become able to run.
     fn update_counters_and_queue_systems(&mut self) {
+        for index in self.blocking_dependants_scratch.drain(..) {
+            let dependant_data = &mut self.system_metadata[index];
+            dependant_data.blocking_dependencies_now -= 1;
+
+            // TODO: if this counter hits zero this can be run in the next phase.
+        }
+
         for index in self.dependants_scratch.drain(..) {
             let dependant_data = &mut self.system_metadata[index];
             dependant_data.dependencies_now -= 1;
@@ -297,6 +318,7 @@ impl ParallelExecutor {
                 self.queued.insert(index);
             }
         }
+
     }
 
     #[cfg(test)]

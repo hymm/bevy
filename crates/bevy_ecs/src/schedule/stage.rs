@@ -6,7 +6,7 @@ use crate::{
         BoxedRunCriteria, BoxedRunCriteriaLabel, BoxedSystemLabel, DuplicateLabelStrategy,
         GraphNode, ParallelExecutor, ParallelSystemContainer, ParallelSystemExecutor,
         RunCriteriaContainer, RunCriteriaDescriptor, RunCriteriaDescriptorOrLabel,
-        RunCriteriaInner, ShouldRun, SingleThreadedExecutor, SystemSet,
+        RunCriteriaInner, ShouldRun, SingleThreadedExecutor, SystemSet, SystemSchedulingMetadata
     },
     system::{BoxedExclusiveSystem, BoxedSystem},
     world::{World, WorldId},
@@ -116,6 +116,8 @@ pub struct SystemStage {
     uninitialized_parallel: Vec<usize>,
     /// Saves the value of the World change_tick during the last tick check
     last_tick_check: u32,
+    ///
+    system_metadata: Vec<SystemSchedulingMetadata>,
 }
 
 impl SystemStage {
@@ -133,6 +135,7 @@ impl SystemStage {
             uninitialized_parallel: vec![],
             uninitialized_exclusive: vec![],
             last_tick_check: Default::default(),
+            system_metadata: Default::default(),
         }
     }
 
@@ -434,6 +437,37 @@ impl SystemStage {
                 container.set_run_criteria(new_indices[index]);
             }
             container.system_mut().initialize(world);
+        }
+    }
+
+    pub fn rebuild_system_meta(&mut self, parallel: &[ParallelSystemContainer], exclusive: &[ExclusiveSystemContainer]) {
+        self.system_metadata.clear();
+        // Construct scheduling data for systems.
+        for container in parallel.iter() {
+            let system = container.system();
+            let (start_sender, start_receiver) = async_channel::bounded(1);
+            self.system_metadata.push(SystemSchedulingMetadata {
+                start_sender,
+                start_receiver,
+                dependants: vec![],
+                blocking_dependants: vec![],
+                dependencies_total: container.dependencies().len(),
+                dependencies_now: 0,
+                blocking_dependencies_total: container.blocking_dependencies().len(),
+                blocking_dependencies_now: 0,
+                is_send: system.is_send(),
+                archetype_component_access: Default::default(),
+            });
+        }
+        // Populate the dependants lists in the scheduling metadata.
+        for (dependant, container) in systems.iter().enumerate() {
+            for dependency in container.dependencies() {
+                self.system_metadata[*dependency].dependants.push(dependant);
+            }
+
+            for dependency in container.blocking_dependencies() {
+                self.system_metadata[*dependency].blocking_dependants.push(dependant);
+            }
         }
     }
 
