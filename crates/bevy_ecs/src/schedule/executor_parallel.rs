@@ -8,10 +8,75 @@ use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
+use bevy_utils::HashMap;
 use fixedbitset::FixedBitSet;
+use std::clone::Clone;
+use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 use SchedulingEvent::*;
+
+struct SharedSystemAccess {
+    access: Arc<Mutex<Access<ArchetypeComponentId>>>,
+    // active access
+    active_access: Arc<Mutex<HashMap<usize, Access<ArchetypeComponentId>>>>,
+    access_updated_recv: Receiver<()>,
+    access_updated_send: Sender<()>,
+}
+
+impl SharedSystemAccess {
+    pub async fn wait_for_access(&mut self, other: &Access<ArchetypeComponentId>, index: usize) {
+        loop {
+            // falsely warning that this mutex guard is help accross the await point
+            // https://github.com/rust-lang/rust-clippy/pull/6585
+            #[allow(must_not_suspend)]
+            let mut access = self.access.lock().unwrap();
+
+            if access.is_compatible(other) {
+                access.extend(other);
+                drop(access);
+                {
+                    let mut active_access = self.active_access.lock().unwrap();
+                    active_access.insert(index, other.clone());
+                }
+                self.access_updated_send.send(()).await.unwrap();
+                break;
+            } else {
+                drop(access);
+                self.access_updated_recv.recv().await.unwrap();
+                // drain any other messages
+                while self.access_updated_recv.recv().await.is_ok() {}
+            }
+        }
+    }
+
+    // use when system is finished running
+    pub async fn remove_access(&mut self, access_id: usize) {
+        {
+            let mut active_access = self.active_access.lock().unwrap();
+            active_access.remove(&access_id);
+            {
+                let mut access = self.access.lock().unwrap();
+                access.clear();
+                for (_, active_access) in active_access.iter() {
+                    access.extend(active_access);
+                }
+            } // drop mutex here
+        }
+        self.access_updated_send.send(()).await.unwrap();
+    }
+}
+
+impl Clone for SharedSystemAccess {
+    fn clone(&self) -> Self {
+        SharedSystemAccess {
+            access: self.access.clone(),
+            active_access: self.active_access.clone(),
+            access_updated_recv: self.access_updated_recv.clone(),
+            access_updated_send: self.access_updated_send.clone(),
+        }
+    }
+}
 
 struct SystemSchedulingMetadata {
     /// Used to signal the system's task to start the system.
@@ -20,7 +85,9 @@ struct SystemSchedulingMetadata {
     start_receiver: Receiver<()>,
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
-    dependants: Vec<usize>,
+    dependants: Vec<Receiver<()>>,
+    finish_sender: Sender<()>,
+    finish_receiver: Receiver<()>,
     /// Total amount of dependencies this system has.
     dependencies_total: usize,
     /// Amount of unsatisfied dependencies, when it reaches 0 the system is queued to be started.
@@ -49,9 +116,7 @@ pub struct ParallelExecutor {
     /// Systems that should run this iteration.
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
-    active_archetype_component_access: Access<ArchetypeComponentId>,
-    /// Scratch space to avoid reallocating a vector when updating dependency counters.
-    dependants_scratch: Vec<usize>,
+    shared_access: SharedSystemAccess,
     #[cfg(test)]
     events_sender: Option<Sender<SchedulingEvent>>,
 }
@@ -68,8 +133,7 @@ impl Default for ParallelExecutor {
             running: Default::default(),
             non_send_running: false,
             should_run: Default::default(),
-            active_archetype_component_access: Default::default(),
-            dependants_scratch: Default::default(),
+            shared_access: Default::default(),
             #[cfg(test)]
             events_sender: None,
         }
@@ -88,9 +152,12 @@ impl ParallelSystemExecutor for ParallelExecutor {
             let dependencies_total = container.dependencies().len();
             let system = container.system();
             let (start_sender, start_receiver) = async_channel::bounded(1);
+            let (finish_sender, finish_receiver) = async_channel::bounded(1);
             self.system_metadata.push(SystemSchedulingMetadata {
                 start_sender,
                 start_receiver,
+                finish_sender,
+                finish_receiver,
                 dependants: vec![],
                 dependencies_total,
                 dependencies_now: 0,
@@ -101,7 +168,10 @@ impl ParallelSystemExecutor for ParallelExecutor {
         // Populate the dependants lists in the scheduling metadata.
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
-                self.system_metadata[*dependency].dependants.push(dependant);
+                let finish_receiver = self.system_metadata[dependant].finish_receiver.clone();
+                self.system_metadata[*dependency]
+                    .dependants
+                    .push(finish_receiver);
             }
         }
     }
@@ -141,7 +211,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
                         // At least one system has finished, so active access is outdated.
                         self.rebuild_active_access();
                     }
-                    self.update_counters_and_queue_systems();
+                    // self.update_counters_and_queue_systems();
                 }
             };
             #[cfg(feature = "trace")]
@@ -198,6 +268,14 @@ impl ParallelExecutor {
                 self.should_run.set(index, true);
                 let start_receiver = system_data.start_receiver.clone();
                 let finish_sender = self.finish_sender.clone();
+                let dependants_finish_sender = system_data.finish_sender.clone();
+                let dependants = system_data
+                    .dependants
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<Receiver<()>>>();
+
+                let shared_access = self.shared_access.clone();
                 let system = system.system_mut();
                 #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
                 let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
@@ -205,19 +283,27 @@ impl ParallelExecutor {
                 let overhead_span =
                     bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
                 let task = async move {
-                    start_receiver
-                        .recv()
-                        .await
-                        .unwrap_or_else(|error| unreachable!(error));
+                    // wait for all dependencies to complete
+                    let mut dependants = dependants.iter();
+                    while let Some(receiver) = dependants.next() {
+                        receiver
+                            .recv()
+                            .await
+                            .unwrap_or_else(|error| unreachable!(error));
+                    }
+                    shared_access
+                        .wait_for_access(&system_data.archetype_component_access, index)
+                        .await;
                     #[cfg(feature = "trace")]
                     let system_guard = system_span.enter();
                     unsafe { system.run_unsafe((), world) };
                     #[cfg(feature = "trace")]
                     drop(system_guard);
-                    finish_sender
-                        .send(index)
+                    dependants_finish_sender
+                        .send(())
                         .await
                         .unwrap_or_else(|error| unreachable!(error));
+                    shared_access.remove_access(index).await;
                 };
 
                 #[cfg(feature = "trace")]
@@ -258,7 +344,11 @@ impl ParallelExecutor {
             // immediately; otherwise, check for conflicts and signal its task to start.
             let system_metadata = &self.system_metadata[index];
             if !self.should_run[index] {
-                self.dependants_scratch.extend(&system_metadata.dependants);
+                system_metadata
+                    .finish_sender
+                    .send(())
+                    .await
+                    .unwrap_or_else(|error| unreachable!(error));
             } else if self.can_start_now(index) {
                 #[cfg(test)]
                 {
@@ -296,7 +386,6 @@ impl ParallelExecutor {
             self.non_send_running = false;
         }
         self.running.set(index, false);
-        self.dependants_scratch.extend(&system_data.dependants);
     }
 
     /// Discards active access information and builds it again using currently
@@ -309,17 +398,18 @@ impl ParallelExecutor {
         }
     }
 
-    /// Drains `dependants_scratch`, decrementing dependency counters and enqueueing any
-    /// systems that become able to run.
-    fn update_counters_and_queue_systems(&mut self) {
-        for index in self.dependants_scratch.drain(..) {
-            let dependant_data = &mut self.system_metadata[index];
-            dependant_data.dependencies_now -= 1;
-            if dependant_data.dependencies_now == 0 {
-                self.queued.insert(index);
-            }
-        }
-    }
+    // replace this code with awaiting depedancies directly
+    // /// Drains `dependants_scratch`, decrementing dependency counters and enqueueing any
+    // /// systems that become able to run.
+    // fn update_counters_and_queue_systems(&mut self) {
+    //     for index in self.dependants_scratch.drain(..) {
+    //         let dependant_data = &mut self.system_metadata[index];
+    //         dependant_data.dependencies_now -= 1;
+    //         if dependant_data.dependencies_now == 0 {
+    //             self.queued.insert(index);
+    //         }
+    //     }
+    // }
 
     #[cfg(test)]
     fn emit_event(&self, event: SchedulingEvent) {
