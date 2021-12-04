@@ -11,7 +11,8 @@ use bevy_utils::tracing::Instrument;
 use bevy_utils::HashMap;
 use fixedbitset::FixedBitSet;
 use std::clone::Clone;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
+use async_mutex::Mutex;
 
 #[cfg(test)]
 use SchedulingEvent::*;
@@ -27,16 +28,13 @@ struct SharedSystemAccess {
 impl SharedSystemAccess {
     pub async fn wait_for_access(&mut self, other: &Access<ArchetypeComponentId>, index: usize) {
         loop {
-            // falsely warning that this mutex guard is help accross the await point
-            // https://github.com/rust-lang/rust-clippy/pull/6585
-            #[allow(must_not_suspend)]
-            let mut access = self.access.lock().unwrap();
+            let mut access = self.access.lock().await;
 
             if access.is_compatible(other) {
                 access.extend(other);
                 drop(access);
                 {
-                    let mut active_access = self.active_access.lock().unwrap();
+                    let mut active_access = self.active_access.lock().await;
                     active_access.insert(index, other.clone());
                 }
                 self.access_updated_send.send(()).await.unwrap();
@@ -53,10 +51,10 @@ impl SharedSystemAccess {
     // use when system is finished running
     pub async fn remove_access(&mut self, access_id: usize) {
         {
-            let mut active_access = self.active_access.lock().unwrap();
+            let mut active_access = self.active_access.lock().await;
             active_access.remove(&access_id);
             {
-                let mut access = self.access.lock().unwrap();
+                let mut access = self.access.lock().await;
                 access.clear();
                 for (_, active_access) in active_access.iter() {
                     access.extend(active_access);
@@ -74,6 +72,19 @@ impl Clone for SharedSystemAccess {
             active_access: self.active_access.clone(),
             access_updated_recv: self.access_updated_recv.clone(),
             access_updated_send: self.access_updated_send.clone(),
+        }
+    }
+}
+
+impl Default for SharedSystemAccess {
+    fn default() -> Self {
+        let (access_updated_send, access_updated_recv) = async_channel::unbounded();
+
+        SharedSystemAccess {
+            access: Default::default(),
+            active_access: Default::default(),
+            access_updated_recv,
+            access_updated_send,
         }
     }
 }
@@ -275,8 +286,9 @@ impl ParallelExecutor {
                     .cloned()
                     .collect::<Vec<Receiver<()>>>();
 
-                let shared_access = self.shared_access.clone();
+                let mut shared_access = self.shared_access.clone();
                 let system = system.system_mut();
+                let archetype_component_access = system_data.archetype_component_access.clone();
                 #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
                 let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
                 #[cfg(feature = "trace")]
@@ -292,7 +304,7 @@ impl ParallelExecutor {
                             .unwrap_or_else(|error| unreachable!(error));
                     }
                     shared_access
-                        .wait_for_access(&system_data.archetype_component_access, index)
+                        .wait_for_access(&archetype_component_access, index)
                         .await;
                     #[cfg(feature = "trace")]
                     let system_guard = system_span.enter();
