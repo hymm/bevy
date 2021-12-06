@@ -267,6 +267,13 @@ impl<'scope, T: Send + 'scope> Scope<'scope, T> {
         let task = self.local_executor.spawn(f);
         self.spawned.push(task);
     }
+
+    pub async fn run(&self, f: impl Future<Output = T>) -> T {
+        self.executor.run(f).await
+    }
+    pub async fn run_local(&self, f: impl Future<Output = T>) -> T {
+        self.local_executor.run(f).await
+    }
 }
 
 #[cfg(test)]
