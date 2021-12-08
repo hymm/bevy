@@ -1,5 +1,6 @@
 use crate::{
     archetype::{ArchetypeComponentId, ArchetypeGeneration},
+    non_ecs_data::{NonEcsDataId, NON_SEND_DATA_ID},
     query::Access,
     schedule::{ParallelSystemContainer, ParallelSystemExecutor},
     world::World,
@@ -25,8 +26,8 @@ struct SystemSchedulingMetadata {
     dependencies_now: usize,
     /// Archetype-component access information.
     archetype_component_access: Access<ArchetypeComponentId>,
-    /// Whether or not this system is send-able
-    is_send: bool,
+    /// Non-Ecs Data access information
+    non_ecs_data_access: Access<NonEcsDataId>,
 }
 
 pub struct ParallelExecutor {
@@ -42,12 +43,12 @@ pub struct ParallelExecutor {
     queued: FixedBitSet,
     /// Systems that are currently running.
     running: FixedBitSet,
-    /// Whether a non-send system is currently running.
-    non_send_running: bool,
     /// Systems that should run this iteration.
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     active_archetype_component_access: Access<ArchetypeComponentId>,
+    /// Compound non ecs data access information of currently running systems.
+    active_non_ecs_data_access: Access<NonEcsDataId>,
     /// Scratch space to avoid reallocating a vector when updating dependency counters.
     dependants_scratch: Vec<usize>,
     #[cfg(test)]
@@ -64,9 +65,9 @@ impl Default for ParallelExecutor {
             finish_receiver,
             queued: Default::default(),
             running: Default::default(),
-            non_send_running: false,
             should_run: Default::default(),
             active_archetype_component_access: Default::default(),
+            active_non_ecs_data_access: Default::default(),
             dependants_scratch: Default::default(),
             #[cfg(test)]
             events_sender: None,
@@ -92,8 +93,8 @@ impl ParallelSystemExecutor for ParallelExecutor {
                 dependants: vec![],
                 dependencies_total,
                 dependencies_now: 0,
-                is_send: system.is_send(),
                 archetype_component_access: Default::default(),
+                non_ecs_data_access: system.non_ecs_data_access().clone(),
             });
         }
         // Populate the dependants lists in the scheduling metadata.
@@ -199,10 +200,13 @@ impl ParallelExecutor {
                         .await
                         .unwrap_or_else(|error| unreachable!(error));
                 };
-                if system_data.is_send {
-                    scope.spawn(task);
-                } else {
+                if system_data
+                    .non_ecs_data_access
+                    .has_write(NonEcsDataId::new(NON_SEND_DATA_ID))
+                {
                     scope.spawn_local(task);
+                } else {
+                    scope.spawn(task);
                 }
             }
             // Queue the system if it has no dependencies, otherwise reset its dependency counter.
@@ -218,10 +222,12 @@ impl ParallelExecutor {
     fn can_start_now(&self, index: usize) -> bool {
         let system_data = &self.system_metadata[index];
         // Non-send systems are considered conflicting with each other.
-        (!self.non_send_running || system_data.is_send)
+        system_data
+            .archetype_component_access
+            .is_compatible(&self.active_archetype_component_access)
             && system_data
-                .archetype_component_access
-                .is_compatible(&self.active_archetype_component_access)
+                .non_ecs_data_access
+                .is_compatible(&self.active_non_ecs_data_access)
     }
 
     /// Starts all non-conflicting queued systems, moves them from `queued` to `running`,
@@ -247,12 +253,12 @@ impl ParallelExecutor {
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
                 self.running.set(index, true);
-                if !system_metadata.is_send {
-                    self.non_send_running = true;
-                }
+
                 // Add this system's access information to the active access information.
                 self.active_archetype_component_access
                     .extend(&system_metadata.archetype_component_access);
+                self.active_non_ecs_data_access
+                    .extend(&system_metadata.non_ecs_data_access);
             }
         }
         #[cfg(test)]
@@ -269,9 +275,6 @@ impl ParallelExecutor {
     /// in the `dependants_scratch`.
     fn process_finished_system(&mut self, index: usize) {
         let system_data = &self.system_metadata[index];
-        if !system_data.is_send {
-            self.non_send_running = false;
-        }
         self.running.set(index, false);
         self.dependants_scratch.extend(&system_data.dependants);
     }
@@ -280,9 +283,13 @@ impl ParallelExecutor {
     /// running systems' access information.
     fn rebuild_active_access(&mut self) {
         self.active_archetype_component_access.clear();
+        self.active_non_ecs_data_access.clear();
         for index in self.running.ones() {
             self.active_archetype_component_access
                 .extend(&self.system_metadata[index].archetype_component_access);
+
+            self.active_non_ecs_data_access
+                .extend(&self.system_metadata[index].non_ecs_data_access);
         }
     }
 

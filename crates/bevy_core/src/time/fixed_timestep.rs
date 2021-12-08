@@ -2,6 +2,7 @@ use crate::Time;
 use bevy_ecs::{
     archetype::{Archetype, ArchetypeComponentId},
     component::ComponentId,
+    non_ecs_data::NonEcsDataId,
     query::Access,
     schedule::ShouldRun,
     system::{ConfigurableSystem, IntoSystem, Local, Res, ResMut, System},
@@ -156,12 +157,12 @@ impl System for FixedTimestep {
         self.internal_system.archetype_component_access()
     }
 
-    fn component_access(&self) -> &Access<ComponentId> {
-        self.internal_system.component_access()
+    fn non_ecs_data_access(&self) -> &Access<NonEcsDataId> {
+        self.internal_system.non_ecs_data_access()
     }
 
-    fn is_send(&self) -> bool {
-        self.internal_system.is_send()
+    fn component_access(&self) -> &Access<ComponentId> {
+        self.internal_system.component_access()
     }
 
     unsafe fn run_unsafe(&mut self, _input: (), world: &World) -> ShouldRun {

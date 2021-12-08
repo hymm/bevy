@@ -1,6 +1,7 @@
 use crate::{
     archetype::{Archetype, ArchetypeComponentId, ArchetypeGeneration},
     component::ComponentId,
+    non_ecs_data::NonEcsDataId,
     query::Access,
     schedule::{BoxedRunCriteriaLabel, GraphNode, RunCriteriaLabel},
     system::{BoxedSystem, IntoSystem, System},
@@ -400,7 +401,19 @@ where
 pub struct RunOnce {
     ran: bool,
     archetype_component_access: Access<ArchetypeComponentId>,
+    non_ecs_data_access: Access<NonEcsDataId>,
     component_access: Access<ComponentId>,
+}
+
+impl Default for RunOnce {
+    fn default() -> Self {
+        Self {
+            ran: false,
+            archetype_component_access: Default::default(),
+            non_ecs_data_access: Default::default(),
+            component_access: Default::default(),
+        }
+    }
 }
 
 impl System for RunOnce {
@@ -421,8 +434,8 @@ impl System for RunOnce {
         &self.archetype_component_access
     }
 
-    fn is_send(&self) -> bool {
-        true
+    fn non_ecs_data_access(&self) -> &Access<NonEcsDataId> {
+        &self.non_ecs_data_access
     }
 
     unsafe fn run_unsafe(&mut self, _input: (), _world: &World) -> ShouldRun {

@@ -4,6 +4,7 @@ pub mod change_detection;
 pub mod component;
 pub mod entity;
 pub mod event;
+pub mod non_ecs_data;
 pub mod query;
 #[cfg(feature = "bevy_reflect")]
 pub mod reflect;
