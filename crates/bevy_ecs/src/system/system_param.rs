@@ -6,7 +6,7 @@ use crate::{
     component::{Component, ComponentId, ComponentTicks, Components},
     entity::{Entities, Entity},
     query::{
-        FilterFetch, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyFetch, WorldQuery,
+        Access, FilterFetch, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyFetch, WorldQuery,
     },
     system::{CommandQueue, Commands, Query, SystemMeta},
     world::{FromWorld, World},
@@ -1181,6 +1181,59 @@ impl<'w, 's> SystemParamFetch<'w, 's> for SystemChangeTickState {
         SystemChangeTick {
             last_change_tick: system_meta.last_change_tick,
             change_tick,
+        }
+    }
+}
+
+/// The [`SystemParamState`] of [`&mut World`]
+pub struct MutWorldState;
+
+impl<'w, 's> SystemParam for &'w mut World {
+    type Fetch = MutWorldState;
+}
+
+unsafe impl<'w, 's> SystemParamState for MutWorldState {
+    type Config = ();
+
+    fn init(_world: &mut World, system_meta: &mut SystemMeta, _config: Self::Config) -> Self {
+        system_meta.set_non_send();
+
+        let mut access = Access::default();
+        access.write_all();
+
+        if !(system_meta.archetype_component_access.is_compatible(&access)) {
+            panic!("&mut World conflicts with a previous mutable system parameter. Allowing this would break Rust's mutability rules");
+        }
+
+        system_meta.archetype_component_access.extend(&access);
+
+        let mut filtered_access = FilteredAccess::default();
+
+        filtered_access.write_all();
+        if !system_meta.component_access_set.get_conflicts(&filtered_access).is_empty() {
+            panic!("&mut World conflicts with a previous mutable system parameter. Allowing this would break Rust's mutability rules");
+        }
+        system_meta.component_access_set.add(filtered_access);
+
+        MutWorldState
+    }
+
+    fn default_config() -> Self::Config {}
+}
+
+impl<'w, 's> SystemParamFetch<'w, 's> for MutWorldState {
+    type Item = &'w mut World;
+    unsafe fn get_param(
+        _state: &'s mut Self,
+        _system_meta: &SystemMeta,
+        world: &'w World,
+        _change_tick: u32, 
+    ) -> Self::Item {
+        // this is unsound. don't allow into production
+        unsafe {
+            let const_ptr = world as *const World;
+            let mut_ptr = const_ptr as *mut World;
+            &mut *mut_ptr
         }
     }
 }

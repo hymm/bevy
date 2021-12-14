@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Access<T: SparseSetIndex> {
     reads_all: bool,
+    writes_all: bool,
     /// A combined set of T read and write accesses.
     reads_and_writes: FixedBitSet,
     writes: FixedBitSet,
@@ -18,6 +19,7 @@ impl<T: SparseSetIndex> Default for Access<T> {
     fn default() -> Self {
         Self {
             reads_all: false,
+            writes_all: false,
             reads_and_writes: Default::default(),
             writes: Default::default(),
             marker: PhantomData,
@@ -56,7 +58,11 @@ impl<T: SparseSetIndex> Access<T> {
 
     /// Returns true if this `Access` contains a write access for the given index.
     pub fn has_write(&self, index: T) -> bool {
-        self.writes.contains(index.sparse_set_index())
+        if self.writes_all {
+            true
+        } else {
+            self.writes.contains(index.sparse_set_index())
+        }
     }
 
     /// Sets this `Access` to having read access for all indices.
@@ -67,6 +73,16 @@ impl<T: SparseSetIndex> Access<T> {
     /// Returns true if this `Access` has read access to all indices.
     pub fn reads_all(&self) -> bool {
         self.reads_all
+    }
+    
+    /// Sets this `Access` to having write access for all indices.
+    pub fn write_all(&mut self) {
+        self.writes_all = true;
+    }
+
+    /// Returns true if this `Access` has write access to all indices.
+    pub fn writes_all(&self) -> bool {
+        self.writes_all
     }
 
     /// Clears all recorded accesses.
@@ -79,6 +95,7 @@ impl<T: SparseSetIndex> Access<T> {
     /// Extends this `Access` with another, copying all accesses of `other` into this.
     pub fn extend(&mut self, other: &Access<T>) {
         self.reads_all = self.reads_all || other.reads_all;
+        self.writes_all = self.writes_all || other.writes_all;
         self.reads_and_writes.union_with(&other.reads_and_writes);
         self.writes.union_with(&other.writes);
     }
@@ -88,9 +105,9 @@ impl<T: SparseSetIndex> Access<T> {
     /// Two `Access` instances are incompatible with each other if one `Access` has a write for
     /// which the other also has a write or a read.
     pub fn is_compatible(&self, other: &Access<T>) -> bool {
-        if self.reads_all {
+        if self.reads_all || self.writes_all {
             0 == other.writes.count_ones(..)
-        } else if other.reads_all {
+        } else if other.reads_all || other.writes_all {
             0 == self.writes.count_ones(..)
         } else {
             self.writes.is_disjoint(&other.reads_and_writes)
@@ -101,11 +118,11 @@ impl<T: SparseSetIndex> Access<T> {
     /// Calculates conflicting accesses between this `Access` and `other`.
     pub fn get_conflicts(&self, other: &Access<T>) -> Vec<T> {
         let mut conflicts = FixedBitSet::default();
-        if self.reads_all {
+        if self.reads_all || self.writes_all {
             conflicts.extend(other.writes.ones());
         }
 
-        if other.reads_all {
+        if other.reads_all || self.writes_all {
             conflicts.extend(self.writes.ones());
         }
         conflicts.extend(self.writes.intersection(&other.reads_and_writes));
@@ -185,6 +202,10 @@ impl<T: SparseSetIndex> FilteredAccess<T> {
         self.access.extend(&access.access);
         self.with.union_with(&access.with);
         self.without.union_with(&access.without);
+    }
+
+    pub fn write_all(&mut self) {
+        self.access.write_all();
     }
 }
 
