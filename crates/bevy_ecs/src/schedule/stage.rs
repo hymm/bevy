@@ -68,6 +68,8 @@ pub struct SystemStage {
     exclusive_at_end: Vec<ExclusiveSystemContainer>,
     /// Topologically sorted parallel systems.
     parallel: Vec<ParallelSystemContainer>,
+    /// keep track of which systems to call apply buffers for
+    parallel_has_commands: Vec<usize>,
     /// Determines if the stage was modified and needs to rebuild its graphs and orders.
     systems_modified: bool,
     /// Determines if the stage's executor was changed.
@@ -100,6 +102,7 @@ impl SystemStage {
             exclusive_before_commands: Default::default(),
             exclusive_at_end: Default::default(),
             parallel: vec![],
+            parallel_has_commands: vec![],
             systems_modified: true,
             executor_modified: true,
             uninitialized_parallel: vec![],
@@ -486,6 +489,12 @@ impl SystemStage {
             &self.exclusive_at_end,
             "exclusive systems at end of stage",
         );
+
+        for (index, container) in self.parallel.iter().enumerate() {
+            if container.has_commands() {
+                self.parallel_has_commands.push(index);
+            }
+        }
     }
 
     /// Logs execution order ambiguities between systems. System orders must be fresh.
@@ -865,7 +874,8 @@ impl Stage for SystemStage {
 
                 // Apply parallel systems' buffers.
                 if self.apply_buffers {
-                    for container in &mut self.parallel {
+                    for index in &mut self.parallel_has_commands {
+                        let container = &mut self.parallel[*index];
                         if container.should_run {
                             #[cfg(feature = "trace")]
                             let span = bevy_utils::tracing::info_span!(

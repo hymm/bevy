@@ -19,6 +19,7 @@ pub struct SystemMeta {
     // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
     // SystemParams from overriding each other
     is_send: bool,
+    has_commands: bool,
     pub(crate) last_change_tick: u32,
 }
 
@@ -29,6 +30,7 @@ impl SystemMeta {
             archetype_component_access: Access::default(),
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
+            has_commands: false,
             last_change_tick: 0,
         }
     }
@@ -45,6 +47,20 @@ impl SystemMeta {
     #[inline]
     pub fn set_non_send(&mut self) {
         self.is_send = false;
+    }
+
+    /// Returns true if the system has [`Command`]
+    #[inline]
+    pub fn has_commands(&self) -> bool {
+        self.has_commands
+    }
+    
+    /// Sets the system to have [`Command`]
+    /// 
+    /// This is irreversible.
+    #[inline]
+    pub fn set_has_commands(&mut self) {
+        self.has_commands = true;
     }
 
     #[inline]
@@ -216,6 +232,10 @@ impl<P: SystemParam + 'static> System for ParamSystem<P> {
 
     fn is_send(&self) -> bool {
         self.state.meta().is_send()
+    }
+
+    fn has_commands(&self) -> bool {
+        self.state.meta().has_commands()
     }
 
     unsafe fn run_unsafe(&mut self, _input: Self::In, world: &World) -> Self::Out {
@@ -434,6 +454,11 @@ where
     #[inline]
     fn is_send(&self) -> bool {
         self.system_meta.is_send
+    }
+
+    #[inline]
+    fn has_commands(&self) -> bool {
+        self.system_meta.has_commands
     }
 
     #[inline]

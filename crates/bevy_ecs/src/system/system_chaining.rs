@@ -82,6 +82,10 @@ impl<SystemA: System, SystemB: System<In = SystemA::Out>> System for ChainSystem
         self.system_a.is_send() && self.system_b.is_send()
     }
 
+    fn has_commands(&self) -> bool {
+        self.system_a.has_commands() || self.system_b.has_commands()
+    }
+
     unsafe fn run_unsafe(&mut self, input: Self::In, world: &World) -> Self::Out {
         let out = self.system_a.run_unsafe(input, world);
         self.system_b.run_unsafe(out, world)

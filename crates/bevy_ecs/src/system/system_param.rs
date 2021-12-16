@@ -507,7 +507,8 @@ unsafe impl ReadOnlySystemParamFetch for CommandQueue {}
 unsafe impl SystemParamState for CommandQueue {
     type Config = ();
 
-    fn init(_world: &mut World, _system_meta: &mut SystemMeta, _config: Self::Config) -> Self {
+    fn init(_world: &mut World, system_meta: &mut SystemMeta, _config: Self::Config) -> Self {
+        system_meta.set_has_commands();
         Default::default()
     }
 

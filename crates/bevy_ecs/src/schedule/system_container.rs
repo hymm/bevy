@@ -154,6 +154,10 @@ impl ParallelSystemContainer {
     pub fn dependencies(&self) -> &[usize] {
         &self.dependencies
     }
+
+    pub fn has_commands(&self) -> bool {
+        self.system.has_commands()
+    }
 }
 
 impl GraphNode for ParallelSystemContainer {

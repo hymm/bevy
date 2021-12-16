@@ -425,6 +425,10 @@ impl System for RunOnce {
         true
     }
 
+    fn has_commands(&self) -> bool {
+        false
+    }
+
     unsafe fn run_unsafe(&mut self, _input: (), _world: &World) -> ShouldRun {
         if self.ran {
             ShouldRun::No
