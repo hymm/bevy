@@ -16,9 +16,6 @@ use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
 
-#[cfg(test)]
-use SchedulingEvent::*;
-
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
     // active access
@@ -116,8 +113,8 @@ pub struct ParallelExecutor {
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
-    #[cfg(test)]
-    events_sender: Option<Sender<SchedulingEvent>>,
+    // #[cfg(test)]
+    // events_sender: Option<Sender<SchedulingEvent>>,
 }
 
 impl Default for ParallelExecutor {
@@ -129,8 +126,8 @@ impl Default for ParallelExecutor {
             running: Default::default(),
             should_run: Default::default(),
             shared_access: Default::default(),
-            #[cfg(test)]
-            events_sender: None,
+            // #[cfg(test)]
+            // events_sender: None,
         }
     }
 }
@@ -166,13 +163,6 @@ impl ParallelSystemExecutor for ParallelExecutor {
     }
 
     fn run_systems(&mut self, systems: &mut [ParallelSystemContainer], world: &mut World) {
-        #[cfg(test)]
-        if self.events_sender.is_none() {
-            let (sender, receiver) = async_channel::unbounded::<SchedulingEvent>();
-            world.insert_resource(receiver);
-            self.events_sender = Some(sender);
-        }
-
         self.update_archetypes(systems, world);
 
         let compute_pool = world
@@ -218,7 +208,6 @@ impl ParallelExecutor {
     /// queues systems with no dependencies to run (or skip) at next opportunity.
     fn prepare_systems<'scope>(
         &mut self,
-        scope: &mut Scope<'scope, ()>,
         systems: &'scope mut [ParallelSystemContainer],
         world: &'scope World,
     ) -> (
@@ -229,69 +218,37 @@ impl ParallelExecutor {
         let span = bevy_utils::tracing::info_span!("prepare_systems");
         #[cfg(feature = "trace")]
         let _guard = span.enter();
-        self.should_run.clear();
-        for (index, (system_data, system)) in
-            self.system_metadata.iter_mut().zip(systems).enumerate()
-        {
-            // Spawn the system task.
-            if system.should_run() {
-                self.should_run.set(index, true);
-                let start_receiver = system_data.start_receiver.clone();
-                let finish_sender = self.finish_sender.clone();
-                let dependants_finish_sender = system_data.finish_sender.clone();
-                let dependants = system_data
-                    .dependants
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<Receiver<()>>>();
+        let mut local_tasks = Vec::new();
+        let mut tasks = Vec::new();
+        for (index, (system_data, system)) in self.system_metadata.iter_mut().zip(systems).enumerate() {
+            if !system.should_run() {
+                // let dependants run if will not run
+                system_data.finish_sender.try_send(())
+                .unwrap_or_else(|error| unreachable!(error));
+                break;
+            }
 
-                let mut shared_access = self.shared_access.clone();
-                let system = system.system_mut();
-                let archetype_component_access = system_data.archetype_component_access.clone();
-                #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
-                let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
-                #[cfg(feature = "trace")]
-                let overhead_span =
-                    bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
-                let task = async move {
-                    // wait for all dependencies to complete
-                    let mut dependants = dependants.iter();
-                    while let Some(receiver) = dependants.next() {
-                        receiver
-                            .recv()
-                            .await
-                            .unwrap_or_else(|error| unreachable!(error));
-                    }
-                    shared_access
-                        .wait_for_access(&archetype_component_access, index)
-                        .await;
-                    #[cfg(feature = "trace")]
-                    let system_guard = system_span.enter();
-                    unsafe { system.run_unsafe((), world) };
-                    #[cfg(feature = "trace")]
-                    drop(system_guard);
-                    dependants_finish_sender
-                        .send(())
-                        .await
-                        .unwrap_or_else(|error| unreachable!(error));
-                    shared_access.remove_access(index).await;
-                };
+            let task = Self::get_system_future(
+                system_data,
+                system,
+                index,
+                world,
+                self.shared_access.clone()
+            );
 
-                #[cfg(feature = "trace")]
-                let task = task.instrument(overhead_span);
-                if system_data.is_send {
-                    tasks.push(task);
-                } else {
-                    local_tasks.push(task);
-                }
-            });
-
+            if system_data.is_send {
+                tasks.push(task);
+            } else {
+                local_tasks.push(task);
+            }
+        }
+        
         (tasks, local_tasks)
     }
 
     fn get_system_future<'scope>(
         system_data: &mut SystemSchedulingMetadata,
-        system_container: &'scope ParallelSystemContainer,
+        system_container: &'scope mut ParallelSystemContainer,
         index: usize,
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
@@ -303,7 +260,7 @@ impl ParallelExecutor {
             .cloned()
             .collect::<Vec<Receiver<()>>>();
 
-        let system = unsafe { system_container.system_mut_unsafe() };
+        let system = system_container.system_mut();
         let archetype_component_access = system_data.archetype_component_access.clone();
         #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
@@ -311,14 +268,17 @@ impl ParallelExecutor {
             // wait for all dependencies to complete
             let mut dependants = dependants.iter();
             while let Some(receiver) = dependants.next() {
+                dbg!("receive on", system.name());
                 receiver
                     .recv()
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
+                dbg!("receive done");
             }
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
+            dbg!("run");
             #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
             unsafe { system.run_unsafe((), world) };
@@ -329,12 +289,8 @@ impl ParallelExecutor {
                 .await
                 .unwrap_or_else(|error| unreachable!(error));
             shared_access.remove_access(index).await;
+            dbg!("done", system.name());
         }
-    }
-
-    #[cfg(test)]
-    fn emit_event(&self, event: SchedulingEvent) {
-        let _ = self.events_sender.as_ref().unwrap().try_send(event);
     }
 }
 
