@@ -6,10 +6,9 @@ use crate::{
 };
 use async_channel::{Receiver, Sender};
 use async_mutex::Mutex;
-use bevy_tasks::{ComputeTaskPool, TaskPool};
+use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use bevy_utils::HashMap;
 use fixedbitset::FixedBitSet;
-use futures::{future::join_all};
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
@@ -25,38 +24,36 @@ struct SharedSystemAccess {
 impl SharedSystemAccess {
     pub async fn wait_for_access(&mut self, other: &Access<ArchetypeComponentId>, index: usize) {
         loop {
-            let mut access = self.access.lock().await;
+            {
+                let mut access = self.access.lock().await;
 
-            if access.is_compatible(other) {
-                access.extend(other);
-                drop(access);
-                {
-                    let mut active_access = self.active_access.lock().await;
-                    active_access.insert(index, other.clone());
+                if access.is_compatible(other) {
+                    access.extend(other);
+                    {
+                        let mut active_access = self.active_access.lock().await;
+                        active_access.insert(index, other.clone());
+                        self.access_updated_send.send(()).await.unwrap();
+                    }
+                    break;
                 }
-                self.access_updated_send.send(()).await.unwrap();
-                break;
-            } else {
-                drop(access);
-                self.access_updated_recv.recv().await.unwrap();
-                // drain any other messages
-                while self.access_updated_recv.recv().await.is_ok() {}
             }
+            self.access_updated_recv.recv().await.unwrap();
+            // drain any other messages
+            while self.access_updated_recv.recv().await.is_ok() {}
         }
     }
 
     // use when system is finished running
     pub async fn remove_access(&mut self, access_id: usize) {
         {
+            let mut access = self.access.lock().await;
+            access.clear();
             let mut active_access = self.active_access.lock().await;
             active_access.remove(&access_id);
-            {
-                let mut access = self.access.lock().await;
-                access.clear();
-                for (_, active_access) in active_access.iter() {
-                    access.extend(active_access);
-                }
-            } // drop mutex here
+
+            for (_, active_access) in active_access.iter() {
+                access.extend(active_access);
+            }
         }
         self.access_updated_send.send(()).await.unwrap();
     }
@@ -152,8 +149,8 @@ impl ParallelSystemExecutor for ParallelExecutor {
         // Populate the dependants lists in the scheduling metadata.
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
-                let finish_receiver = self.system_metadata[dependant].finish_receiver.clone();
-                self.system_metadata[*dependency]
+                let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
+                self.system_metadata[dependant]
                     .dependants
                     .push(finish_receiver);
             }
@@ -166,14 +163,8 @@ impl ParallelSystemExecutor for ParallelExecutor {
         let compute_pool = world
             .get_resource_or_insert_with(|| ComputeTaskPool(TaskPool::default()))
             .clone();
-        compute_pool.scope(|scope| {
-            let (system_tasks, system_local_tasks) = self.prepare_systems(systems, world);
-            scope.spawn(async move {
-                join_all(system_tasks).await;
-            });
-            scope.spawn_local(async move {
-                join_all(system_local_tasks).await;
-            });
+        compute_pool.scope(|mut scope| {
+            self.prepare_systems(&mut scope, systems, world);
         });
     }
 }
@@ -206,23 +197,25 @@ impl ParallelExecutor {
     /// queues systems with no dependencies to run (or skip) at next opportunity.
     fn prepare_systems<'scope>(
         &mut self,
+        scope: &mut Scope<'scope, ()>,
         systems: &'scope mut [ParallelSystemContainer],
         world: &'scope World,
-    ) -> (
-        Vec<impl Future<Output = ()> + 'scope>,
-        Vec<impl Future<Output = ()> + 'scope>,
     ) {
         #[cfg(feature = "trace")]
         let span = bevy_utils::tracing::info_span!("prepare_systems");
         #[cfg(feature = "trace")]
         let _guard = span.enter();
-        let mut local_tasks = Vec::new();
+        let mut local_task = Vec::new();
         let mut tasks = Vec::new();
-        for (index, (system_data, system)) in self.system_metadata.iter_mut().zip(systems).enumerate() {
+        for (index, (system_data, system)) in
+            self.system_metadata.iter_mut().zip(systems).enumerate()
+        {
             if !system.should_run() {
                 // let dependants run if will not run
-                system_data.finish_sender.try_send(())
-                .unwrap_or_else(|error| unreachable!(error));
+                system_data
+                    .finish_sender
+                    .try_send(())
+                    .unwrap_or_else(|error| unreachable!(error));
                 break;
             }
 
@@ -231,17 +224,23 @@ impl ParallelExecutor {
                 system,
                 index,
                 world,
-                self.shared_access.clone()
+                self.shared_access.clone(),
             );
 
             if system_data.is_send {
                 tasks.push(task);
             } else {
-                local_tasks.push(task);
+                local_task.push(task);
             }
         }
-        
-        (tasks, local_tasks)
+
+        for task in tasks.into_iter() {
+            scope.spawn(task);
+        }
+
+        for task in local_task.into_iter() {
+            scope.spawn_local(task);
+        }
     }
 
     fn get_system_future<'scope>(
@@ -276,7 +275,7 @@ impl ParallelExecutor {
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
-            dbg!("run");
+            dbg!("run", system.name());
             #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
             unsafe { system.run_unsafe((), world) };
