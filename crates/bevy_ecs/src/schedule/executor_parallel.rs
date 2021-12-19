@@ -4,16 +4,16 @@ use crate::{
     schedule::{ParallelSystemContainer, ParallelSystemExecutor},
     world::World,
 };
+use async_broadcast::{broadcast, Receiver, Sender};
 use async_channel;
-use async_broadcast::{broadcast, Sender, Receiver};
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
+use futures_util::future::join_all;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
-use futures_util::future::join_all;
 
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
@@ -102,7 +102,6 @@ pub struct ParallelExecutor {
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
-
     // #[cfg(test)]
     // events_sender: Option<Sender<SchedulingEvent>>,
 }
