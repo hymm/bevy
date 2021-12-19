@@ -1360,20 +1360,20 @@ mod tests {
             vec![0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
         );
 
-        // world.get_resource_mut::<Vec<usize>>().unwrap().clear();
-        // let mut stage = SystemStage::parallel()
-        //     .with_system(make_parallel(2).label("234").label("2"))
-        //     .with_system(make_parallel(1).before("234").after("0"))
-        //     .with_system(make_parallel(0).label("0"))
-        //     .with_system(make_parallel(4).label("234").label("4"))
-        //     .with_system(make_parallel(3).label("234").after("2").before("4"));
-        // stage.run(&mut world);
-        // stage.set_executor(Box::new(SingleThreadedExecutor::default()));
-        // stage.run(&mut world);
-        // assert_eq!(
-        //     *world.get_resource::<Vec<usize>>().unwrap(),
-        //     vec![0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
-        // );
+        world.get_resource_mut::<Vec<usize>>().unwrap().clear();
+        let mut stage = SystemStage::parallel()
+            .with_system(make_parallel(2).label("234").label("2"))
+            .with_system(make_parallel(1).before("234").after("0"))
+            .with_system(make_parallel(0).label("0"))
+            .with_system(make_parallel(4).label("234").label("4"))
+            .with_system(make_parallel(3).label("234").after("2").before("4"));
+        stage.run(&mut world);
+        stage.set_executor(Box::new(SingleThreadedExecutor::default()));
+        stage.run(&mut world);
+        assert_eq!(
+            *world.get_resource::<Vec<usize>>().unwrap(),
+            vec![0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+        );
     }
 
     #[test]
