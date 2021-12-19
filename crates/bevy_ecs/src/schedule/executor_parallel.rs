@@ -4,23 +4,25 @@ use crate::{
     schedule::{ParallelSystemContainer, ParallelSystemExecutor},
     world::World,
 };
-use async_channel::{Receiver, Sender};
+use async_channel;
+use async_broadcast::{broadcast, Sender, Receiver};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
-use bevy_utils::HashMap;
+use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
+use futures_util::future::join_all;
 
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
     // active access
-    active_access: Arc<Mutex<HashMap<usize, Access<ArchetypeComponentId>>>>,
-    access_updated_recv: Receiver<()>,
-    access_updated_send: Sender<()>,
+    active_access: DashMap<usize, Access<ArchetypeComponentId>>,
+    access_updated_recv: async_channel::Receiver<()>,
+    access_updated_send: async_channel::Sender<()>,
 }
 
 impl SharedSystemAccess {
@@ -28,20 +30,14 @@ impl SharedSystemAccess {
         loop {
             {
                 let mut access = self.access.lock().await;
-
-                if access.is_compatible(other) {
+                let is_compatible = access.is_compatible(other);
+                if is_compatible {
                     access.extend(other);
-                    {
-                        let mut active_access = self.active_access.lock().await;
-                        active_access.insert(index, other.clone());
-                        self.access_updated_send.send(()).await.unwrap();
-                    }
+                    self.active_access.insert(index, other.clone());
                     break;
                 }
             }
             self.access_updated_recv.recv().await.unwrap();
-            // drain any other messages
-            while self.access_updated_recv.recv().await.is_ok() {}
         }
     }
 
@@ -50,12 +46,10 @@ impl SharedSystemAccess {
         {
             let mut access = self.access.lock().await;
             access.clear();
-            let mut active_access = self.active_access.lock().await;
-            active_access.remove(&access_id);
-
-            for (_, active_access) in active_access.iter() {
-                access.extend(active_access);
-            }
+            self.active_access.remove(&access_id);
+            self.active_access
+                .iter()
+                .for_each(|active_access| access.extend(&active_access));
         }
         self.access_updated_send.send(()).await.unwrap();
     }
@@ -110,6 +104,7 @@ pub struct ParallelExecutor {
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
+
     // #[cfg(test)]
     // events_sender: Option<Sender<SchedulingEvent>>,
 }
@@ -139,7 +134,8 @@ impl ParallelSystemExecutor for ParallelExecutor {
         // Construct scheduling data for systems.
         for container in systems.iter() {
             let system = container.system();
-            let (finish_sender, finish_receiver) = async_channel::bounded(1);
+            let (mut finish_sender, finish_receiver) = broadcast(1);
+            finish_sender.set_overflow(true);
             self.system_metadata.push(SystemSchedulingMetadata {
                 finish_sender,
                 finish_receiver,
@@ -207,8 +203,8 @@ impl ParallelExecutor {
         let span = bevy_utils::tracing::info_span!("prepare_systems");
         #[cfg(feature = "trace")]
         let _guard = span.enter();
-        let mut local_task = Vec::new();
         let mut tasks = Vec::new();
+        let mut local_tasks = Vec::new();
         for (index, (system_data, system)) in
             self.system_metadata.iter_mut().zip(systems).enumerate()
         {
@@ -216,7 +212,7 @@ impl ParallelExecutor {
                 // let dependants run if will not run
                 system_data
                     .finish_sender
-                    .try_send(())
+                    .try_broadcast(())
                     .unwrap_or_else(|error| unreachable!(error));
                 break;
             }
@@ -232,15 +228,15 @@ impl ParallelExecutor {
             if system_data.is_send {
                 tasks.push(task);
             } else {
-                local_task.push(task);
+                local_tasks.push(task);
             }
         }
 
-        for task in tasks.into_iter() {
+        for task in tasks {
             scope.spawn(task);
         }
 
-        for task in local_task.into_iter() {
+        for task in local_tasks {
             scope.spawn_local(task);
         }
     }
@@ -253,7 +249,7 @@ impl ParallelExecutor {
         mut shared_access: SharedSystemAccess,
     ) -> impl Future<Output = ()> + 'scope {
         let dependants_finish_sender = system_data.finish_sender.clone();
-        let dependants = system_data
+        let mut dependants = system_data
             .dependants
             .iter()
             .cloned()
@@ -261,34 +257,24 @@ impl ParallelExecutor {
 
         let system = system_container.system_mut();
         let archetype_component_access = system_data.archetype_component_access.clone();
-        #[cfg(feature = "trace")] // NB: outside the task to get the TLS current span
+        #[cfg(feature = "trace")]
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
         async move {
             // wait for all dependencies to complete
-            let mut dependants = dependants.iter();
-            while let Some(receiver) = dependants.next() {
-                dbg!("receive on", system.name());
-                receiver
-                    .recv()
-                    .await
-                    .unwrap_or_else(|error| unreachable!(error));
-                dbg!("receive done");
-            }
+            join_all(dependants.iter_mut().map(|receiver| receiver.recv())).await;
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
-            dbg!("run", system.name());
             #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
             drop(system_guard);
             dependants_finish_sender
-                .send(())
+                .broadcast(())
                 .await
                 .unwrap_or_else(|error| unreachable!(error));
             shared_access.remove_access(index).await;
-            dbg!("done", system.name());
         }
     }
 }
