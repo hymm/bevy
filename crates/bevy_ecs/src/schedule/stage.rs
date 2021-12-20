@@ -976,11 +976,6 @@ mod tests {
     }
 
     #[test]
-    fn parallel_systems() {
-        let mut world = World::new();
-    }
-
-    #[test]
     fn insertion_points() {
         let mut world = World::new();
         world.insert_resource(Vec::<usize>::new());
