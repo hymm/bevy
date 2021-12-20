@@ -104,12 +104,18 @@ pub struct ParallelExecutor {
     should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
+    /// channel to delay sending system finish until all systems are spawned.
+    spawn_finished_sender: Sender<()>,
+    spawn_finished_receiver: Receiver<()>,
     // #[cfg(test)]
     // events_sender: Option<Sender<SchedulingEvent>>,
 }
 
 impl Default for ParallelExecutor {
     fn default() -> Self {
+        
+        let (mut spawn_finished_sender, spawn_finished_receiver) = broadcast(1);
+        spawn_finished_sender.set_overflow(true);
         Self {
             archetype_generation: ArchetypeGeneration::initial(),
             system_metadata: Default::default(),
@@ -117,6 +123,8 @@ impl Default for ParallelExecutor {
             running: Default::default(),
             should_run: Default::default(),
             shared_access: Default::default(),
+            spawn_finished_sender,
+            spawn_finished_receiver,
             // #[cfg(test)]
             // events_sender: None,
         }
@@ -222,6 +230,7 @@ impl ParallelExecutor {
                 index,
                 world,
                 self.shared_access.clone(),
+                self.spawn_finished_receiver.clone(),
             );
 
             if system_data.is_send {
@@ -238,6 +247,9 @@ impl ParallelExecutor {
         for task in local_tasks {
             scope.spawn_local(task);
         }
+
+        // should just run once
+        while self.spawn_finished_sender.try_broadcast(()).is_err() {};
     }
 
     fn get_system_future<'scope>(
@@ -246,6 +258,8 @@ impl ParallelExecutor {
         index: usize,
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
+        mut spawn_finished_receiver: Receiver<()>,
+
     ) -> impl Future<Output = ()> + 'scope {
         let dependants_finish_sender = system_data.finish_sender.clone();
         let mut dependants = system_data
@@ -269,6 +283,8 @@ impl ParallelExecutor {
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
             drop(system_guard);
+            // delay sending finish signals to dependants until after spawning tasks is done
+            spawn_finished_receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
             dependants_finish_sender
                 .broadcast(())
                 .await
