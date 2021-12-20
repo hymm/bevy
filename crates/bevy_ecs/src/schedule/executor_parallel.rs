@@ -14,6 +14,9 @@ use futures_util::future::join_all;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
+#[cfg(feature = "trace")]
+use bevy_utils::tracing::Instrument;
+
 
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
@@ -81,6 +84,7 @@ struct SystemSchedulingMetadata {
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
     dependants: Vec<Receiver<()>>,
+    /// send channel to 
     finish_sender: Sender<()>,
     finish_receiver: Receiver<()>,
     /// Archetype-component access information.
@@ -234,6 +238,8 @@ impl ParallelExecutor {
             } else {
                 scope.spawn_local(task);
             }
+
+            
         }
 
         // should just run once
@@ -260,9 +266,14 @@ impl ParallelExecutor {
         let archetype_component_access = system_data.archetype_component_access.clone();
         #[cfg(feature = "trace")]
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
-        async move {
-            // wait for all dependencies to complete
-            join_all(dependants.iter_mut().map(|receiver| receiver.recv())).await;
+        #[cfg(feature = "trace")]
+        let system_waiting_span = bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
+        let future = async move {
+            // wait for all dependencies to complete[
+            let mut dependancies = dependants.iter_mut();
+            while let Some(receiver) = dependancies.next() {
+                receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
+            }
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
@@ -274,11 +285,18 @@ impl ParallelExecutor {
             shared_access.remove_access(index).await;
             // delay sending finish signals to dependants until after spawning tasks is done
             spawn_finished_receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
-            dependants_finish_sender
+            // greater than 1 because the 1 is the receiver store in system metadata
+            if dependants_finish_sender.receiver_count() > 1 {
+                dependants_finish_sender
                 .broadcast(())
                 .await
                 .unwrap_or_else(|error| unreachable!(error));
-        }
+            }
+        };
+        #[cfg(feature = "trace")]
+        let future = future.instrument(system_waiting_span);
+
+        future
     }
 }
 
