@@ -271,13 +271,13 @@ impl ParallelExecutor {
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
             drop(system_guard);
+            shared_access.remove_access(index).await;
             // delay sending finish signals to dependants until after spawning tasks is done
             spawn_finished_receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
             dependants_finish_sender
                 .broadcast(())
                 .await
                 .unwrap_or_else(|error| unreachable!(error));
-            shared_access.remove_access(index).await;
         }
     }
 }
