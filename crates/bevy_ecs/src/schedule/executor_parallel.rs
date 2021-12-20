@@ -210,8 +210,6 @@ impl ParallelExecutor {
         let span = bevy_utils::tracing::info_span!("prepare_systems");
         #[cfg(feature = "trace")]
         let _guard = span.enter();
-        let mut tasks = Vec::new();
-        let mut local_tasks = Vec::new();
         for (index, (system_data, system)) in
             self.system_metadata.iter_mut().zip(systems).enumerate()
         {
@@ -234,18 +232,10 @@ impl ParallelExecutor {
             );
 
             if system_data.is_send {
-                tasks.push(task);
+                scope.spawn(task);
             } else {
-                local_tasks.push(task);
+                scope.spawn_local(task);
             }
-        }
-
-        for task in tasks {
-            scope.spawn(task);
-        }
-
-        for task in local_tasks {
-            scope.spawn_local(task);
         }
 
         // should just run once
