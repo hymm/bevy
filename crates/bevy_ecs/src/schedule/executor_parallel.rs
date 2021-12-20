@@ -12,7 +12,6 @@ use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
-use futures_util::future::join_all;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
@@ -24,8 +23,8 @@ struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
     // active access
     active_access: DashMap<usize, Access<ArchetypeComponentId>>,
-    access_updated_recv: async_channel::Receiver<()>,
-    access_updated_send: async_channel::Sender<()>,
+    access_updated_recv: Receiver<()>,
+    access_updated_send: Sender<()>,
 }
 
 impl SharedSystemAccess {
@@ -54,7 +53,7 @@ impl SharedSystemAccess {
                 .iter()
                 .for_each(|active_access| access.extend(&active_access));
         }
-        self.access_updated_send.send(()).await.unwrap();
+        self.access_updated_send.broadcast(()).await.unwrap();
     }
 }
 
@@ -71,7 +70,8 @@ impl Clone for SharedSystemAccess {
 
 impl Default for SharedSystemAccess {
     fn default() -> Self {
-        let (access_updated_send, access_updated_recv) = async_channel::unbounded();
+        let (mut access_updated_send, access_updated_recv) = broadcast(1);
+        access_updated_send.set_overflow(true);
 
         SharedSystemAccess {
             access: Default::default(),
