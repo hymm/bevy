@@ -11,7 +11,6 @@ use bevy_utils::tracing::Instrument;
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use dashmap::DashMap;
-use fixedbitset::FixedBitSet;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use std::sync::Arc;
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
     // active access
-    active_access: DashMap<usize, Access<ArchetypeComponentId>>,
+    active_access: Arc<DashMap<usize, Access<ArchetypeComponentId>>>,
     access_updated_recv: Receiver<()>,
     access_updated_send: Sender<()>,
 }
@@ -99,12 +98,6 @@ pub struct ParallelExecutor {
     archetype_generation: ArchetypeGeneration,
     /// Cached metadata of every system.
     system_metadata: Vec<SystemSchedulingMetadata>,
-    /// Systems that should be started at next opportunity.
-    queued: FixedBitSet,
-    /// Systems that are currently running.
-    running: FixedBitSet,
-    /// Systems that should run this iteration.
-    should_run: FixedBitSet,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
     /// channel to delay sending system finish until all systems are spawned.
@@ -121,9 +114,6 @@ impl Default for ParallelExecutor {
         Self {
             archetype_generation: ArchetypeGeneration::initial(),
             system_metadata: Default::default(),
-            queued: Default::default(),
-            running: Default::default(),
-            should_run: Default::default(),
             shared_access: Default::default(),
             spawn_finished_sender,
             spawn_finished_receiver,
@@ -136,9 +126,6 @@ impl Default for ParallelExecutor {
 impl ParallelSystemExecutor for ParallelExecutor {
     fn rebuild_cached_data(&mut self, systems: &[ParallelSystemContainer]) {
         self.system_metadata.clear();
-        self.queued.grow(systems.len());
-        self.running.grow(systems.len());
-        self.should_run.grow(systems.len());
 
         // Construct scheduling data for systems.
         for container in systems.iter() {
@@ -270,7 +257,7 @@ impl ParallelExecutor {
         #[cfg(feature = "trace")]
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
         let future = async move {
-            // wait for all dependencies to complete[
+            // wait for all dependencies to complete
             let mut dependancies = dependants.iter_mut();
             while let Some(receiver) = dependancies.next() {
                 receiver
@@ -278,14 +265,17 @@ impl ParallelExecutor {
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
             }
+            
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
-            #[cfg(feature = "trace")]
+            
+                #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
             drop(system_guard);
+
             shared_access.remove_access(index).await;
 
             // only await for these if there are dependants
@@ -295,7 +285,7 @@ impl ParallelExecutor {
                     .recv()
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
-                // greater than 1 because the 1 is the receiver store in system metadata
+                // greater than 1 because the 1 is the receiver stored in system metadata
                 if dependants_finish_sender.receiver_count() > 1 {
                     dependants_finish_sender
                         .broadcast(())
