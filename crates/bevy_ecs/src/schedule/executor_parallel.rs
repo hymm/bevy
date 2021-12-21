@@ -89,8 +89,8 @@ struct SystemSchedulingMetadata {
     archetype_component_access: Access<ArchetypeComponentId>,
     /// Whether or not this system is send-able
     is_send: bool,
-    /// true if system has dependants
-    has_dependants: bool,
+    /// number of dependants a system has
+    dependants_total: usize,
 }
 
 pub struct ParallelExecutor {
@@ -137,15 +137,16 @@ impl ParallelSystemExecutor for ParallelExecutor {
                 finish_receiver,
                 dependancies: vec![],
                 is_send: system.is_send(),
-                has_dependants: false,
+                dependants_total: 0,
                 archetype_component_access: Default::default(),
             });
         }
         // Populate the dependants lists in the scheduling metadata.
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
+                self.system_metadata[*dependency].dependants_total += 1;
+                
                 let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
-                self.system_metadata[*dependency].has_dependants = true;
                 self.system_metadata[dependant]
                     .dependancies
                     .push(finish_receiver);
@@ -219,7 +220,7 @@ impl ParallelExecutor {
                 index,
                 world,
                 self.shared_access.clone(),
-                self.spawn_finished_receiver.clone(),
+                &self.spawn_finished_receiver,
             );
 
             if system_data.is_send {
@@ -227,10 +228,11 @@ impl ParallelExecutor {
             } else {
                 scope.spawn_local(task);
             }
-        }
 
-        // should just run once
-        while self.spawn_finished_sender.try_broadcast(()).is_err() {}
+            // notify other tasks that we have spawned another task
+            // should always succeed since we set channel to allow overflow
+            self.spawn_finished_sender.try_broadcast(()).unwrap();
+        }
     }
 
     fn get_system_future<'scope>(
@@ -239,10 +241,14 @@ impl ParallelExecutor {
         index: usize,
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
-        mut spawn_finished_receiver: Receiver<()>,
+        spawn_finished_receiver: &Receiver<()>,
     ) -> impl Future<Output = ()> + 'scope {
-        let dependants_finish_sender = if system_data.has_dependants {
-            Some(system_data.finish_sender.clone())
+        let dependants_total = system_data.dependants_total;
+        let finish_senders = if dependants_total > 0 {
+            Some((
+                system_data.finish_sender.clone(),
+                spawn_finished_receiver.clone(),
+            ))
         } else {
             None
         };
@@ -279,19 +285,21 @@ impl ParallelExecutor {
             shared_access.remove_access(index).await;
 
             // only await for these if there are dependants
-            if let Some(dependants_finish_sender) = dependants_finish_sender {
-                // delay sending finish signals to dependants until after spawning tasks is done
-                spawn_finished_receiver
-                    .recv()
-                    .await
-                    .unwrap_or_else(|error| unreachable!(error));
-                // greater than 1 because the 1 is the receiver stored in system metadata
-                if dependants_finish_sender.receiver_count() > 1 {
-                    dependants_finish_sender
-                        .broadcast(())
+            if let Some((dependants_finish_sender, mut spawn_finished_receiver)) = finish_senders {
+                // prevent sending finish until all dependants have spawned
+                // the expected receiver count is twice the number of dependants because we clone all the receivers and
+                // store an additional one on the system for rebuilding the cached data
+                while dependants_finish_sender.receiver_count() < dependants_total * 2 + 1 {
+                    spawn_finished_receiver
+                        .recv()
                         .await
                         .unwrap_or_else(|error| unreachable!(error));
                 }
+                // greater than 1 because the 1 is the receiver store in system metadata
+                dependants_finish_sender
+                    .broadcast(())
+                    .await
+                    .unwrap_or_else(|error| unreachable!(error));
             }
         };
 
