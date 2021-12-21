@@ -10,8 +10,6 @@ use async_channel;
 use bevy_utils::tracing::Instrument;
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::Instrument;
 use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
 use std::clone::Clone;
@@ -271,9 +269,6 @@ impl ParallelExecutor {
         let archetype_component_access = system_data.archetype_component_access.clone();
         #[cfg(feature = "trace")]
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
-        #[cfg(feature = "trace")]
-        let system_waiting_span =
-            bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
         let future = async move {
             // wait for all dependencies to complete[
             let mut dependancies = dependants.iter_mut();
@@ -309,8 +304,6 @@ impl ParallelExecutor {
                 }
             }
         };
-        #[cfg(feature = "trace")]
-        let future = future.instrument(system_waiting_span);
 
         future
     }
