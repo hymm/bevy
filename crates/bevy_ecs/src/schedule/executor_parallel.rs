@@ -10,14 +10,13 @@ use async_channel;
 use bevy_utils::tracing::Instrument;
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
+#[cfg(feature = "trace")]
+use bevy_utils::tracing::Instrument;
 use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
 use std::clone::Clone;
 use std::future::Future;
 use std::sync::Arc;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::Instrument;
-
 
 struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
@@ -85,14 +84,16 @@ impl Default for SharedSystemAccess {
 struct SystemSchedulingMetadata {
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
-    dependants: Vec<Receiver<()>>,
-    /// send channel to 
+    dependancies: Vec<Receiver<()>>,
+    /// send channel to
     finish_sender: Sender<()>,
     finish_receiver: Receiver<()>,
     /// Archetype-component access information.
     archetype_component_access: Access<ArchetypeComponentId>,
     /// Whether or not this system is send-able
     is_send: bool,
+    /// true if system has dependants
+    has_dependants: bool,
 }
 
 pub struct ParallelExecutor {
@@ -117,7 +118,6 @@ pub struct ParallelExecutor {
 
 impl Default for ParallelExecutor {
     fn default() -> Self {
-        
         let (mut spawn_finished_sender, spawn_finished_receiver) = broadcast(1);
         spawn_finished_sender.set_overflow(true);
         Self {
@@ -150,8 +150,9 @@ impl ParallelSystemExecutor for ParallelExecutor {
             self.system_metadata.push(SystemSchedulingMetadata {
                 finish_sender,
                 finish_receiver,
-                dependants: vec![],
+                dependancies: vec![],
                 is_send: system.is_send(),
+                has_dependants: false,
                 archetype_component_access: Default::default(),
             });
         }
@@ -159,8 +160,9 @@ impl ParallelSystemExecutor for ParallelExecutor {
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
                 let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
+                self.system_metadata[*dependency].has_dependants = true;
                 self.system_metadata[dependant]
-                    .dependants
+                    .dependancies
                     .push(finish_receiver);
             }
         }
@@ -240,12 +242,10 @@ impl ParallelExecutor {
             } else {
                 scope.spawn_local(task);
             }
-
-            
         }
 
         // should just run once
-        while self.spawn_finished_sender.try_broadcast(()).is_err() {};
+        while self.spawn_finished_sender.try_broadcast(()).is_err() {}
     }
 
     fn get_system_future<'scope>(
@@ -255,11 +255,14 @@ impl ParallelExecutor {
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
         mut spawn_finished_receiver: Receiver<()>,
-
     ) -> impl Future<Output = ()> + 'scope {
-        let dependants_finish_sender = system_data.finish_sender.clone();
+        let dependants_finish_sender = if system_data.has_dependants {
+            Some(system_data.finish_sender.clone())
+        } else {
+            None
+        };
         let mut dependants = system_data
-            .dependants
+            .dependancies
             .iter()
             .cloned()
             .collect::<Vec<Receiver<()>>>();
@@ -269,12 +272,16 @@ impl ParallelExecutor {
         #[cfg(feature = "trace")]
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
         #[cfg(feature = "trace")]
-        let system_waiting_span = bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
+        let system_waiting_span =
+            bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
         let future = async move {
             // wait for all dependencies to complete[
             let mut dependancies = dependants.iter_mut();
             while let Some(receiver) = dependancies.next() {
-                receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
+                receiver
+                    .recv()
+                    .await
+                    .unwrap_or_else(|error| unreachable!(error));
             }
             shared_access
                 .wait_for_access(&archetype_component_access, index)
@@ -285,14 +292,21 @@ impl ParallelExecutor {
             #[cfg(feature = "trace")]
             drop(system_guard);
             shared_access.remove_access(index).await;
-            // delay sending finish signals to dependants until after spawning tasks is done
-            spawn_finished_receiver.recv().await.unwrap_or_else(|error| unreachable!(error));
-            // greater than 1 because the 1 is the receiver store in system metadata
-            if dependants_finish_sender.receiver_count() > 1 {
-                dependants_finish_sender
-                .broadcast(())
-                .await
-                .unwrap_or_else(|error| unreachable!(error));
+
+            // only await for these if there are dependants
+            if let Some(dependants_finish_sender) = dependants_finish_sender {
+                // delay sending finish signals to dependants until after spawning tasks is done
+                spawn_finished_receiver
+                    .recv()
+                    .await
+                    .unwrap_or_else(|error| unreachable!(error));
+                // greater than 1 because the 1 is the receiver store in system metadata
+                if dependants_finish_sender.receiver_count() > 1 {
+                    dependants_finish_sender
+                        .broadcast(())
+                        .await
+                        .unwrap_or_else(|error| unreachable!(error));
+                }
             }
         };
         #[cfg(feature = "trace")]
