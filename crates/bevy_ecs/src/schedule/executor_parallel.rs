@@ -206,6 +206,10 @@ impl ParallelExecutor {
                 break;
             }
 
+            // span needs to be defined before get_system_future to get the name
+            #[cfg(feature = "trace")]
+            let system_overhead_span = bevy_utils::tracing::info_span!("system_overhead", name = &*system.name());
+
             let task = Self::get_system_future(
                 system_data,
                 system,
@@ -214,8 +218,6 @@ impl ParallelExecutor {
                 self.shared_access.clone(),
             );
 
-            #[cfg(feature = "trace")]
-            let system_overhead_span = bevy_utils::tracing::info_span!("system_overhead");
             #[cfg(feature = "trace")]
             let task = task.instrument(system_overhead_span);
 
