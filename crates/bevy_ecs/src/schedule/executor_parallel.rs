@@ -1,7 +1,10 @@
 use crate::{
     archetype::{ArchetypeComponentId, ArchetypeGeneration},
     query::Access,
-    schedule::{ParallelSystemContainer, ParallelSystemExecutor},
+    schedule::{
+        finish_channel::{finish_channel, Receiver as FinishReceiver, Sender as FinishSender},
+        ParallelSystemContainer, ParallelSystemExecutor,
+    },
     world::World,
 };
 use async_broadcast::{broadcast, Receiver, Sender};
@@ -80,10 +83,10 @@ impl Default for SharedSystemAccess {
 struct SystemSchedulingMetadata {
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
-    dependancies: Vec<Receiver<()>>,
+    dependancies: Vec<FinishReceiver>,
     /// send channel to
-    finish_sender: Sender<()>,
-    finish_receiver: Receiver<()>,
+    finish_sender: FinishSender,
+    finish_receiver: FinishReceiver,
     /// Archetype-component access information.
     archetype_component_access: Access<ArchetypeComponentId>,
     /// Whether or not this system is send-able
@@ -99,23 +102,16 @@ pub struct ParallelExecutor {
     system_metadata: Vec<SystemSchedulingMetadata>,
     /// Compound archetype-component access information of currently running systems.
     shared_access: SharedSystemAccess,
-    /// channel to delay sending system finish until all systems are spawned.
-    spawn_finished_sender: Sender<()>,
-    spawn_finished_receiver: Receiver<()>,
     // #[cfg(test)]
     // events_sender: Option<Sender<SchedulingEvent>>,
 }
 
 impl Default for ParallelExecutor {
     fn default() -> Self {
-        let (mut spawn_finished_sender, spawn_finished_receiver) = broadcast(1);
-        spawn_finished_sender.set_overflow(true);
         Self {
             archetype_generation: ArchetypeGeneration::initial(),
             system_metadata: Default::default(),
             shared_access: Default::default(),
-            spawn_finished_sender,
-            spawn_finished_receiver,
             // #[cfg(test)]
             // events_sender: None,
         }
@@ -129,8 +125,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
         // Construct scheduling data for systems.
         for container in systems.iter() {
             let system = container.system();
-            let (mut finish_sender, finish_receiver) = broadcast(1);
-            finish_sender.set_overflow(true);
+            let (finish_sender, finish_receiver) = finish_channel();
             self.system_metadata.push(SystemSchedulingMetadata {
                 finish_sender,
                 finish_receiver,
@@ -207,9 +202,7 @@ impl ParallelExecutor {
             if !system.should_run() {
                 // let dependants run if will not run
                 system_data
-                    .finish_sender
-                    .try_broadcast(())
-                    .unwrap_or_else(|error| unreachable!(error));
+                    .finish_sender.finish();
                 break;
             }
 
@@ -219,7 +212,6 @@ impl ParallelExecutor {
                 index,
                 world,
                 self.shared_access.clone(),
-                &self.spawn_finished_receiver,
             );
 
             #[cfg(feature = "trace")]
@@ -232,10 +224,6 @@ impl ParallelExecutor {
             } else {
                 scope.spawn_local(task);
             }
-
-            // notify other tasks that we have spawned another task
-            // should always succeed since we set channel to allow overflow
-            self.spawn_finished_sender.try_broadcast(()).unwrap();
         }
     }
 
@@ -245,14 +233,14 @@ impl ParallelExecutor {
         index: usize,
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
-        spawn_finished_receiver: &Receiver<()>,
     ) -> impl Future<Output = ()> + 'scope {
         let dependants_total = system_data.dependants_total;
         let finish_senders = if dependants_total > 0 {
-            Some((
+            // it should be ok to reset here because systems are topologically sorted
+            system_data.finish_sender.reset();
+            Some(
                 system_data.finish_sender.clone(),
-                spawn_finished_receiver.clone(),
-            ))
+            )
         } else {
             None
         };
@@ -267,9 +255,9 @@ impl ParallelExecutor {
             let mut dependancies = dependants.iter_mut();
             while let Some(receiver) = dependancies.next() {
                 receiver
-                    .recv()
+                    .finished()
                     .await
-                    .unwrap_or_else(|error| unreachable!(error));
+                    ;
             }
 
             shared_access
@@ -285,21 +273,9 @@ impl ParallelExecutor {
             shared_access.remove_access(index).await;
 
             // only await for these if there are dependants
-            if let Some((dependants_finish_sender, mut spawn_finished_receiver)) = finish_senders {
-                // prevent sending finish until all dependants have spawned
-                // the expected receiver count is twice the number of dependants because we clone all the receivers and
-                // store an additional one on the system for rebuilding the cached data
-                while dependants_finish_sender.receiver_count() < dependants_total * 2 + 1 {
-                    spawn_finished_receiver
-                        .recv()
-                        .await
-                        .unwrap_or_else(|error| unreachable!(error));
-                }
+            if let Some(mut dependants_finish_sender) = finish_senders {
                 // greater than 1 because the 1 is the receiver store in system metadata
-                dependants_finish_sender
-                    .broadcast(())
-                    .await
-                    .unwrap_or_else(|error| unreachable!(error));
+                dependants_finish_sender.finish();
             }
         };
 

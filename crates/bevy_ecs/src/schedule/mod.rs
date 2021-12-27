@@ -5,6 +5,7 @@
 
 mod executor;
 mod executor_parallel;
+mod finish_channel;
 pub mod graph_utils;
 mod label;
 mod run_criteria;
