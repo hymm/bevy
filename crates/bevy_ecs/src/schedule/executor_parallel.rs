@@ -222,6 +222,11 @@ impl ParallelExecutor {
                 &self.spawn_finished_receiver,
             );
 
+            #[cfg(feature = "trace")]
+            let system_overhead_span = bevy_utils::tracing::info_span!("system_overhead");
+            #[cfg(feature = "trace")]
+            let task = task.instrument(system_overhead_span);
+
             if system_data.is_send {
                 scope.spawn(task);
             } else {
