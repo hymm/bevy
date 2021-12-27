@@ -5,11 +5,10 @@ use crate::{
     world::World,
 };
 use async_broadcast::{broadcast, Receiver, Sender};
-use async_channel;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::Instrument;
 use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
+#[cfg(feature = "trace")]
+use bevy_utils::tracing::Instrument;
 use dashmap::DashMap;
 use std::clone::Clone;
 use std::future::Future;
@@ -145,7 +144,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
         for (dependant, container) in systems.iter().enumerate() {
             for dependency in container.dependencies() {
                 self.system_metadata[*dependency].dependants_total += 1;
-                
+
                 let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
                 self.system_metadata[dependant]
                     .dependancies
@@ -252,11 +251,7 @@ impl ParallelExecutor {
         } else {
             None
         };
-        let mut dependants = system_data
-            .dependancies
-            .iter()
-            .cloned()
-            .collect::<Vec<Receiver<()>>>();
+        let mut dependants = system_data.dependancies.to_owned();
 
         let system = system_container.system_mut();
         let archetype_component_access = system_data.archetype_component_access.clone();
@@ -271,12 +266,12 @@ impl ParallelExecutor {
                     .await
                     .unwrap_or_else(|error| unreachable!(error));
             }
-            
+
             shared_access
                 .wait_for_access(&archetype_component_access, index)
                 .await;
-            
-                #[cfg(feature = "trace")]
+
+            #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
