@@ -30,8 +30,7 @@ impl SharedSystemAccess {
         loop {
             {
                 let mut access = self.access.lock().await;
-                let is_compatible = access.is_compatible(other);
-                if is_compatible {
+                if access.is_compatible(other) {
                     access.extend(other);
                     self.active_access.insert(index, other.clone());
                     break;
