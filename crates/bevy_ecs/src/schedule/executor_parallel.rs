@@ -201,14 +201,14 @@ impl ParallelExecutor {
         {
             if !system.should_run() {
                 // let dependants run if will not run
-                system_data
-                    .finish_sender.finish();
+                system_data.finish_sender.finish();
                 break;
             }
 
             // span needs to be defined before get_system_future to get the name
             #[cfg(feature = "trace")]
-            let system_overhead_span = bevy_utils::tracing::info_span!("system_overhead", name = &*system.name());
+            let system_overhead_span =
+                bevy_utils::tracing::info_span!("system_overhead", name = &*system.name());
 
             let task = Self::get_system_future(
                 system_data,
@@ -240,9 +240,7 @@ impl ParallelExecutor {
         let finish_senders = if dependants_total > 0 {
             // it should be ok to reset here because systems are topologically sorted
             system_data.finish_sender.reset();
-            Some(
-                system_data.finish_sender.clone(),
-            )
+            Some(system_data.finish_sender.clone())
         } else {
             None
         };
@@ -256,10 +254,7 @@ impl ParallelExecutor {
             // wait for all dependencies to complete
             let mut dependancies = dependants.iter_mut();
             while let Some(receiver) = dependancies.next() {
-                receiver
-                    .finished()
-                    .await
-                    ;
+                receiver.finished().await;
             }
 
             shared_access

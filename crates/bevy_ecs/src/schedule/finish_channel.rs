@@ -41,7 +41,6 @@ impl Sender {
     }
 }
 
-
 #[derive(Clone)]
 pub struct Receiver {
     channel: Arc<Channel>,
