@@ -201,7 +201,7 @@ impl ParallelExecutor {
             if !system.should_run() {
                 // let dependants run if will not run
                 system_data.finish_sender.finish();
-                break;
+                continue;
             }
 
             // span needs to be defined before get_system_future to get the name
