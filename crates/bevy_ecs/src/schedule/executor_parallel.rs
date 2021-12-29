@@ -235,9 +235,9 @@ impl ParallelExecutor {
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
     ) -> impl Future<Output = ()> + 'scope {
-        let dependants_total = system_data.dependants_total;
-        let finish_senders = if dependants_total > 0 {
+        let finish_senders = if system_data.dependants_total > 0 {
             // it should be ok to reset here because systems are topologically sorted
+            // so systems that need to wait on the finish sender have not been spawned yet
             system_data.finish_sender.reset();
             Some(system_data.finish_sender.clone())
         } else {
