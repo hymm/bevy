@@ -33,11 +33,10 @@ pub struct Sender {
 
 impl Sender {
     pub fn finish(&mut self) {
-        self
-            .channel
+        self.channel
             .dependencies_finished_count
             .fetch_add(1, Ordering::Relaxed);
-            self.channel.finish_event.notify(usize::MAX);
+        self.channel.finish_event.notify(usize::MAX);
     }
 }
 
@@ -61,15 +60,17 @@ impl Receiver {
             >= self.channel.dependencies_total.load(Ordering::Relaxed)
     }
 
-    pub fn set_dependencies_total(&mut self, total: usize) { 
-        self.channel.dependencies_total.store(total, Ordering::Relaxed);
+    pub fn set_dependencies_total(&mut self, total: usize) {
+        self.channel
+            .dependencies_total
+            .store(total, Ordering::Relaxed);
     }
-    
+
     pub fn reset(&mut self) {
-      self.channel
-          .dependencies_finished_count
-          .store(0, Ordering::Relaxed);
-  }
+        self.channel
+            .dependencies_finished_count
+            .store(0, Ordering::Relaxed);
+    }
 }
 
 pub struct Finished<'a> {

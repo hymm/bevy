@@ -143,7 +143,9 @@ impl ParallelSystemExecutor for ParallelExecutor {
                     .push(finish_sender);
             }
 
-            self.system_metadata[dependant].finish_receiver.set_dependencies_total(dependancies_total);
+            self.system_metadata[dependant]
+                .finish_receiver
+                .set_dependencies_total(dependancies_total);
         }
     }
 
@@ -267,7 +269,6 @@ impl ParallelExecutor {
             if let Some(mut dependants) = dependants {
                 dependants.iter_mut().for_each(|sender| sender.finish());
             }
-            
         };
 
         future
