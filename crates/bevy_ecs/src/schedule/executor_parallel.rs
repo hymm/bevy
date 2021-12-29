@@ -2,7 +2,7 @@ use crate::{
     archetype::{ArchetypeComponentId, ArchetypeGeneration},
     query::Access,
     schedule::{
-        finish_channel::{finish_channel, Receiver as FinishReceiver, Sender as FinishSender},
+        finish_channel_2::{finish_channel, Receiver as FinishReceiver, Sender as FinishSender},
         ParallelSystemContainer, ParallelSystemExecutor,
     },
     world::World,
@@ -82,7 +82,7 @@ impl Default for SharedSystemAccess {
 struct SystemSchedulingMetadata {
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
-    dependancies: Vec<FinishReceiver>,
+    dependants: Vec<FinishSender>,
     /// send channel to
     finish_sender: FinishSender,
     finish_receiver: FinishReceiver,
@@ -90,8 +90,6 @@ struct SystemSchedulingMetadata {
     archetype_component_access: Access<ArchetypeComponentId>,
     /// Whether or not this system is send-able
     is_send: bool,
-    /// number of dependants a system has
-    dependants_total: usize,
 }
 
 pub struct ParallelExecutor {
@@ -128,22 +126,24 @@ impl ParallelSystemExecutor for ParallelExecutor {
             self.system_metadata.push(SystemSchedulingMetadata {
                 finish_sender,
                 finish_receiver,
-                dependancies: vec![],
+                dependants: vec![],
                 is_send: system.is_send(),
-                dependants_total: 0,
                 archetype_component_access: Default::default(),
             });
         }
         // Populate the dependants lists in the scheduling metadata.
         for (dependant, container) in systems.iter().enumerate() {
+            let mut dependancies_total = 0;
             for dependency in container.dependencies() {
-                self.system_metadata[*dependency].dependants_total += 1;
+                dependancies_total += 1;
 
-                let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
-                self.system_metadata[dependant]
-                    .dependancies
-                    .push(finish_receiver);
+                let finish_sender = self.system_metadata[dependant].finish_sender.clone();
+                self.system_metadata[*dependency]
+                    .dependants
+                    .push(finish_sender);
             }
+
+            self.system_metadata[dependant].finish_receiver.set_dependencies_total(dependancies_total);
         }
     }
 
@@ -235,15 +235,12 @@ impl ParallelExecutor {
         world: &'scope World,
         mut shared_access: SharedSystemAccess,
     ) -> impl Future<Output = ()> + 'scope {
-        let dependants_total = system_data.dependants_total;
-        let finish_senders = if dependants_total > 0 {
-            // it should be ok to reset here because systems are topologically sorted
-            system_data.finish_sender.reset();
-            Some(system_data.finish_sender.clone())
-        } else {
+        let mut finish_receiver = system_data.finish_receiver.clone();
+        let dependants = if system_data.dependants.is_empty() {
             None
+        } else {
+            Some(system_data.dependants.to_owned())
         };
-        let mut dependants = system_data.dependancies.to_owned();
 
         let system = system_container.system_mut();
         let archetype_component_access = system_data.archetype_component_access.clone();
@@ -251,10 +248,9 @@ impl ParallelExecutor {
         let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
         let future = async move {
             // wait for all dependencies to complete
-            let mut dependancies = dependants.iter_mut();
-            while let Some(receiver) = dependancies.next() {
-                receiver.finished().await;
-            }
+            finish_receiver.finished().await;
+            // reset receiver for next tick
+            finish_receiver.reset();
 
             shared_access
                 .wait_for_access(&archetype_component_access, index)
@@ -268,11 +264,10 @@ impl ParallelExecutor {
 
             shared_access.remove_access(index).await;
 
-            // only await for these if there are dependants
-            if let Some(mut dependants_finish_sender) = finish_senders {
-                // greater than 1 because the 1 is the receiver store in system metadata
-                dependants_finish_sender.finish();
+            if let Some(mut dependants) = dependants {
+                dependants.iter_mut().for_each(|sender| sender.finish());
             }
+            
         };
 
         future
