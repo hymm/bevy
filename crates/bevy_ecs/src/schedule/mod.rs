@@ -7,6 +7,7 @@ mod executor;
 mod executor_parallel;
 pub mod graph_utils;
 mod label;
+mod one_shot_channel;
 mod run_criteria;
 mod stage;
 mod state;

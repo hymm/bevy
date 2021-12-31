@@ -1,10 +1,13 @@
 use crate::{
     archetype::{ArchetypeComponentId, ArchetypeGeneration},
     query::Access,
-    schedule::{ParallelSystemContainer, ParallelSystemExecutor},
+    schedule::{
+        one_shot_channel::{Receiver as StartReceiver, Sender as StartSender, one_shot_channel},
+        ParallelSystemContainer, ParallelSystemExecutor,
+    },
     world::World,
 };
-use async_channel::{Receiver, Sender};
+use async_channel::{Sender, Receiver};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
@@ -15,9 +18,9 @@ use SchedulingEvent::*;
 
 struct SystemSchedulingMetadata {
     /// Used to signal the system's task to start the system.
-    start_sender: Sender<()>,
+    start_sender: StartSender,
     /// Receives the signal to start the system.
-    start_receiver: Receiver<()>,
+    start_receiver: StartReceiver,
     /// Indices of systems that depend on this one, used to decrement their
     /// dependency counters when this system finishes.
     dependants: Vec<usize>,
@@ -87,7 +90,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
         for container in systems.iter() {
             let dependencies_total = container.dependencies().len();
             let system = container.system();
-            let (start_sender, start_receiver) = async_channel::bounded(1);
+            let (start_sender, start_receiver) = one_shot_channel();
             self.system_metadata.push(SystemSchedulingMetadata {
                 start_sender,
                 start_receiver,
@@ -206,9 +209,8 @@ impl ParallelExecutor {
                     bevy_utils::tracing::info_span!("system overhead", name = &*system.name());
                 let task = async move {
                     start_receiver
-                        .recv()
-                        .await
-                        .unwrap_or_else(|error| unreachable!(error));
+                        .finished()
+                        .await;
                     #[cfg(feature = "trace")]
                     let system_guard = system_span.enter();
                     unsafe { system.run_unsafe((), world) };
@@ -266,9 +268,7 @@ impl ParallelExecutor {
                 }
                 system_metadata
                     .start_sender
-                    .send(())
-                    .await
-                    .unwrap_or_else(|error| unreachable!(error));
+                    .finish();
                 self.running.set(index, true);
                 if !system_metadata.is_send {
                     self.non_send_running = true;
