@@ -135,20 +135,6 @@ impl ParallelSystemContainer {
         }
     }
 
-    pub(crate) fn from_exclusive_descriptor(descriptor: ExclusiveSystemDescriptor) -> Self {
-        ParallelSystemContainer {
-            system: descriptor.system,
-            should_run: false,
-            run_criteria_index: None,
-            run_criteria_label: None,
-            dependencies: Vec::new(),
-            labels: descriptor.labels,
-            before: descriptor.before,
-            after: descriptor.after,
-            ambiguity_sets: descriptor.ambiguity_sets,
-        }
-    }
-
     pub fn name(&self) -> Cow<'static, str> {
         GraphNode::name(self)
     }
