@@ -185,8 +185,6 @@ impl TaskPool {
 
             if scope.spawned.is_empty() {
                 Vec::default()
-            } else if scope.spawned.len() == 1 {
-                vec![future::block_on(&mut scope.spawned[0])]
             } else {
                 let fut = async move {
                     let mut results = Vec::with_capacity(scope.spawned.len());
@@ -266,6 +264,34 @@ impl<'scope, T: Send + 'scope> Scope<'scope, T> {
     pub fn spawn_local<Fut: Future<Output = T> + 'scope>(&mut self, f: Fut) {
         let task = self.local_executor.spawn(f);
         self.spawned.push(task);
+    }
+
+    // must be run on the local executor. this is required since we need to pass the local executor around
+    #[must_use]
+    pub fn async_scope<F, U>(&self, f: F) -> impl Future<Output = Vec<U>> + 'scope
+    where
+        F: FnOnce(&mut Scope<'scope, U>) + 'scope,
+        U: Send + 'static,
+    {
+        // spawn a new scope for the sub scope
+        let mut scope = Scope {
+            executor: self.executor,
+            local_executor: self.local_executor,
+            spawned: Vec::new(),
+        };
+
+        f(&mut scope);
+
+        let fut = async move {
+            let mut results = Vec::with_capacity(scope.spawned.len());
+            for task in scope.spawned {
+                results.push(task.await);
+            }
+
+            results
+        };
+
+        fut
     }
 }
 
@@ -389,5 +415,42 @@ mod tests {
         barrier.wait();
         assert!(!thread_check_failed.load(Ordering::Acquire));
         assert_eq!(count.load(Ordering::Acquire), 200);
+    }
+
+    #[test]
+    fn test_nested_spawn() {
+        let pool = TaskPool::new();
+
+        let foo = Box::new(42);
+        let foo = &*foo;
+
+        let count = Arc::new(AtomicI32::new(0));
+
+        let outputs = pool.scope(|scope| {
+            let count = count.clone();
+
+            let task = scope.async_scope(move |scope| {
+                for _ in 0..100 {
+                    let count_clone = count.clone();
+                    scope.spawn(async move {
+                        if *foo != 42 {
+                            panic!("not 42!?!?")
+                        } else {
+                            count_clone.fetch_add(1, Ordering::Relaxed);
+                            *foo
+                        }
+                    });
+                }
+            });
+            scope.spawn_local(task);
+        });
+
+        let outputs = outputs.into_iter().flatten().collect::<Vec<i32>>();
+        assert_eq!(outputs.len(), 100);
+        for output in outputs {
+            assert_eq!(output, 42);
+        }
+
+        assert_eq!(count.load(Ordering::Relaxed), 100);
     }
 }
