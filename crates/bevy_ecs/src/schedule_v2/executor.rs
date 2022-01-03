@@ -1,7 +1,11 @@
 use crate::{
-    world::World, 
     schedule::{
-        graph_utils::{self, DependencyGraphError},ParallelSystemContainer, BoxedSystemLabel, BoxedRunCriteriaLabel, SystemContainer, GraphNode, SystemDescriptor, IntoSystemDescriptor}};
+        graph_utils::{self, DependencyGraphError},
+        BoxedRunCriteriaLabel, BoxedSystemLabel, GraphNode, IntoSystemDescriptor,
+        ParallelSystemContainer, SystemContainer, SystemDescriptor,
+    },
+    world::World,
+};
 use bevy_tasks::{ComputeTaskPool, TaskPool};
 use bevy_utils::{tracing::info, HashMap, HashSet};
 use std::fmt::Debug;
@@ -37,13 +41,13 @@ impl ExecutorParallel {
             let system = &mut self.systems[0];
             let system = system.system_mut();
             let task = async move {
-                unsafe { system.run_unsafe((), world )};
+                unsafe { system.run_unsafe((), world) };
             };
 
             scope.spawn(task);
         });
     }
-    
+
     pub fn add_system<Params>(&mut self, system: impl IntoSystemDescriptor<Params>) -> &mut Self {
         self.add_system_inner(system.into_descriptor());
         self
@@ -74,10 +78,7 @@ impl ExecutorParallel {
         // This assertion is there to document that a maximum of `u32::MAX / 8` systems should be
         // added to a stage to guarantee that change detection has no false positive, but it
         // can be circumvented using exclusive or chained systems
-        assert!(
-                self.systems.len()
-                < (u32::MAX / 8) as usize
-        );
+        assert!(self.systems.len() < (u32::MAX / 8) as usize);
         fn unwrap_dependency_cycle_error<Node: GraphNode, Output, Labels: Debug>(
             result: Result<Output, DependencyGraphError<Labels>>,
             nodes: &[Node],
@@ -110,7 +111,6 @@ impl ExecutorParallel {
         );
     }
 }
-
 
 /// Sorts given system containers topologically, populates their resolved dependencies
 /// and run criteria.
@@ -160,12 +160,12 @@ mod tests {
     fn make_parallel(tag: usize) -> impl FnMut(ResMut<Vec<usize>>) {
         move |mut resource: ResMut<Vec<usize>>| {
             dbg!("parallel system runs");
-            resource.push(tag)}
+            resource.push(tag)
+        }
     }
 
     #[test]
     fn run_parallel_system() {
-
         let mut world = World::new();
         world.insert_resource(Vec::<usize>::new());
 
@@ -174,10 +174,7 @@ mod tests {
 
         executor.run(&mut world);
 
-        assert_eq!(
-            *world.get_resource::<Vec<usize>>().unwrap(),
-            vec![0]
-        );
+        assert_eq!(*world.get_resource::<Vec<usize>>().unwrap(), vec![0]);
     }
 
     #[test]
@@ -190,9 +187,6 @@ mod tests {
 
         executor.run(&mut world);
 
-        assert_eq!(
-            *world.get_resource::<Vec<usize>>().unwrap(),
-            vec![0]
-        );
+        assert_eq!(*world.get_resource::<Vec<usize>>().unwrap(), vec![0]);
     }
 }
