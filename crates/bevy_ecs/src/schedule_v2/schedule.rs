@@ -1,20 +1,43 @@
 use crate::{
+    archetype::ArchetypeComponentId,
+    query::Access,
     schedule::{
         graph_utils::{self, DependencyGraphError},
-        BoxedRunCriteriaLabel, BoxedSystemLabel, GraphNode, IntoSystemDescriptor,
-        ParallelSystemContainer, SystemContainer, SystemDescriptor,
+        BoxedSystemLabel, GraphNode, IntoSystemDescriptor, ParallelSystemContainer,
+        SystemContainer, SystemDescriptor,
+    },
+    schedule_v2::{
+        executor::SharedSystemAccess,
+        one_shot_notify::{one_shot_notify, Receiver as NotifyReceiver, Sender as NotifySender},
     },
     world::World,
 };
 use bevy_tasks::Scope;
-use bevy_utils::{tracing::info, HashMap, HashSet};
-use std::future::Future;
+use bevy_utils::HashSet;
 use std::fmt::Debug;
+use std::future::Future;
+
+struct SystemSchedulingMetadata {
+    /// Indices of systems that depend on this one, used to decrement their
+    /// dependency counters when this system finishes.
+    dependancies: Vec<NotifyReceiver>,
+    /// send channel to
+    finish_sender: NotifySender,
+    finish_receiver: NotifyReceiver,
+    /// Archetype-component access information.
+    archetype_component_access: Access<ArchetypeComponentId>,
+    /// Whether or not this system is send-able
+    is_send: bool,
+    /// number of dependants a system has
+    dependants_total: usize,
+}
 
 pub struct Schedule {
     systems_modified: bool,
     uninitialized_parallel: Vec<usize>,
     systems: Vec<ParallelSystemContainer>,
+    /// Cached metadata of systems
+    system_metadata: Vec<SystemSchedulingMetadata>,
 }
 
 impl Schedule {
@@ -23,6 +46,7 @@ impl Schedule {
             systems_modified: false,
             uninitialized_parallel: vec![],
             systems: vec![],
+            system_metadata: vec![],
         }
     }
 
@@ -44,26 +68,21 @@ impl Schedule {
         }
     }
 
-    pub unsafe fn run_unsafe<'scope>(&'scope mut self, world: *mut World, scope: & Scope<'scope, ()>) -> impl Future<Output=Vec<()>> + 'scope {
+    pub unsafe fn run_unsafe<'scope>(
+        &'scope mut self,
+        world: *mut World,
+        scope: &Scope<'scope, ()>,
+        shared_access: &'scope SharedSystemAccess,
+    ) -> impl Future<Output = Vec<()>> + 'scope {
         let world = world.as_mut().unwrap();
         if self.systems_modified {
             self.initialize_systems(world);
             self.rebuild_orders_and_dependencies();
+            self.rebuild_cached_data();
             self.systems_modified = false;
         }
-
-        let systems = &mut self.systems;
-
         // put async_scope in an async block to throw away value
-        scope.async_scope(move |scope| {
-            let system = &mut systems[0];
-            let system = system.system_mut();
-            let task = async move {
-                unsafe { system.run_unsafe((), world) };
-            };
-
-            scope.spawn(task);
-        })
+        scope.async_scope(move |scope| self.spawn_systems(scope, world, shared_access))
     }
 
     fn initialize_systems(&mut self, world: &mut World) {
@@ -109,6 +128,120 @@ impl Schedule {
             &self.systems,
             "parallel systems",
         );
+    }
+
+    fn rebuild_cached_data(&mut self) {
+        self.system_metadata.clear();
+
+        // Construct scheduling data for systems.
+        for container in self.systems.iter() {
+            let system = container.system();
+            let (finish_sender, finish_receiver) = one_shot_notify();
+            self.system_metadata.push(SystemSchedulingMetadata {
+                finish_sender,
+                finish_receiver,
+                dependancies: vec![],
+                is_send: system.is_send(),
+                dependants_total: 0,
+                archetype_component_access: Default::default(),
+            });
+        }
+
+        // Populate the dependants lists in the scheduling metadata.
+        for (dependant, container) in self.systems.iter().enumerate() {
+            for dependency in container.dependencies() {
+                self.system_metadata[*dependency].dependants_total += 1;
+
+                let finish_receiver = self.system_metadata[*dependency].finish_receiver.clone();
+                self.system_metadata[dependant]
+                    .dependancies
+                    .push(finish_receiver);
+            }
+        }
+    }
+
+    fn spawn_systems<'scope>(
+        &'scope mut self,
+        scope: &mut Scope<'scope, ()>,
+        world: &'scope World,
+        shared_access: &'scope SharedSystemAccess,
+    ) {
+        #[cfg(feature = "trace")]
+        let span = bevy_utils::tracing::info_span!("prepare_systems");
+        #[cfg(feature = "trace")]
+        let _guard = span.enter();
+        for (index, (system_data, system)) in self
+            .system_metadata
+            .iter_mut()
+            .zip(&mut self.systems)
+            .enumerate()
+        {
+            // span needs to be defined before get_system_future to get the name
+            #[cfg(feature = "trace")]
+            let system_overhead_span =
+                bevy_utils::tracing::info_span!("system_overhead", name = &*system.name());
+            let task =
+                Self::get_system_future(system_data, system, index, world, shared_access.clone());
+
+            #[cfg(feature = "trace")]
+            let task = task.instrument(system_overhead_span);
+
+            if system_data.is_send {
+                scope.spawn(task);
+            } else {
+                scope.spawn_local(task);
+            }
+        }
+    }
+
+    fn get_system_future<'scope>(
+        system_data: &mut SystemSchedulingMetadata,
+        system_container: &'scope mut ParallelSystemContainer,
+        index: usize,
+        world: &'scope World,
+        mut shared_access: SharedSystemAccess,
+    ) -> impl Future<Output = ()> + 'scope {
+        let finish_senders = if system_data.dependants_total > 0 {
+            // it should be ok to reset here because systems are topologically sorted
+            // so systems that need to wait on the finish sender have not been spawned yet
+            system_data.finish_sender.reset();
+            Some(system_data.finish_sender.clone())
+        } else {
+            None
+        };
+        let mut dependants = system_data.dependancies.to_owned();
+
+        let system = system_container.system_mut();
+        let archetype_component_access = system_data.archetype_component_access.clone();
+        #[cfg(feature = "trace")]
+        let system_span = bevy_utils::tracing::info_span!("system", name = &*system.name());
+        let future = async move {
+            // wait for all dependencies to complete
+            let mut dependancies = dependants.iter_mut();
+            while let Some(receiver) = dependancies.next() {
+                receiver.notified().await;
+            }
+
+            shared_access
+                .wait_for_access(&archetype_component_access, index)
+                .await;
+
+            #[cfg(feature = "trace")]
+            let system_guard = system_span.enter();
+            unsafe { system.run_unsafe((), world) };
+            #[cfg(feature = "trace")]
+            drop(system_guard);
+
+            shared_access.remove_access(index).await;
+
+            // only await for these if there are dependants
+            if let Some(mut dependants_finish_sender) = finish_senders {
+                // greater than 1 because the 1 is the receiver store in system metadata
+                dependants_finish_sender.notify();
+            }
+        };
+
+        future
     }
 }
 

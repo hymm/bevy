@@ -1,26 +1,95 @@
 use crate::{
+    archetype::ArchetypeComponentId,
+    query::Access,
     schedule::{
         graph_utils::{self, DependencyGraphError},
-        BoxedRunCriteriaLabel, BoxedSystemLabel, GraphNode, IntoSystemDescriptor,
-        ParallelSystemContainer, SystemContainer, SystemDescriptor,
+        BoxedSystemLabel, IntoSystemDescriptor, SystemContainer,
     },
     schedule_v2::schedule::Schedule,
     world::World,
 };
+use async_broadcast::{broadcast, Receiver, Sender};
+use async_mutex::Mutex;
 use bevy_tasks::{ComputeTaskPool, TaskPool};
-use bevy_utils::{tracing::info, HashMap, HashSet};
-use std::fmt::Debug;
+use bevy_utils::HashSet;
+use dashmap::DashMap;
+use std::sync::Arc;
 
 // use std::pin::Pin;
 // use futures_lite::pin;
+
+pub struct SharedSystemAccess {
+    access: Arc<Mutex<Access<ArchetypeComponentId>>>,
+    active_access: Arc<DashMap<usize, Access<ArchetypeComponentId>>>,
+    access_updated_recv: Receiver<()>,
+    access_updated_send: Sender<()>,
+}
+
+impl SharedSystemAccess {
+    pub async fn wait_for_access(&mut self, other: &Access<ArchetypeComponentId>, index: usize) {
+        loop {
+            {
+                let mut access = self.access.lock().await;
+                if access.is_compatible(other) {
+                    access.extend(other);
+                    self.active_access.insert(index, other.clone());
+                    break;
+                }
+            }
+            self.access_updated_recv.recv().await.unwrap();
+        }
+    }
+
+    // use when system is finished running
+    pub async fn remove_access(&mut self, access_id: usize) {
+        {
+            let mut access = self.access.lock().await;
+            access.clear();
+            self.active_access.remove(&access_id);
+            self.active_access
+                .iter()
+                .for_each(|active_access| access.extend(&active_access));
+        }
+
+        self.access_updated_send.broadcast(()).await.unwrap();
+    }
+}
+
+impl Clone for SharedSystemAccess {
+    fn clone(&self) -> Self {
+        Self {
+            access: self.access.clone(),
+            active_access: self.active_access.clone(),
+            access_updated_recv: self.access_updated_recv.clone(),
+            access_updated_send: self.access_updated_send.clone(),
+        }
+    }
+}
+
+impl Default for SharedSystemAccess {
+    fn default() -> Self {
+        let (mut access_updated_send, access_updated_recv) = broadcast(1);
+        access_updated_send.set_overflow(true);
+
+        Self {
+            access: Default::default(),
+            active_access: Default::default(),
+            access_updated_recv,
+            access_updated_send,
+        }
+    }
+}
+
 struct ExecutorParallel {
-    pub(crate) base_schedule: Schedule
+    pub(crate) base_schedule: Schedule,
+    shared_access: SharedSystemAccess,
 }
 
 impl ExecutorParallel {
     pub fn new() -> Self {
         Self {
             base_schedule: Schedule::new(),
+            shared_access: Default::default(),
         }
     }
 
@@ -30,13 +99,16 @@ impl ExecutorParallel {
             .clone();
 
         compute_pool.scope(|scope| {
-            let task = unsafe { self.base_schedule.run_unsafe(world, scope) };
-            let task = async move { task.await; };
-            scope.spawn_local(task);
+            let task = unsafe {
+                self.base_schedule
+                    .run_unsafe(world, scope, &self.shared_access)
+            };
+            scope.spawn_local(async move {
+                task.await;
+            });
         });
     }
 
-    
     pub fn add_system<Params>(&mut self, system: impl IntoSystemDescriptor<Params>) -> &mut Self {
         self.base_schedule.add_system(system);
         self
@@ -89,10 +161,7 @@ mod tests {
     }
 
     fn make_parallel(tag: usize) -> impl FnMut(ResMut<Vec<usize>>) {
-        move |mut resource: ResMut<Vec<usize>>| {
-            dbg!("parallel system runs");
-            resource.push(tag)
-        }
+        move |mut resource: ResMut<Vec<usize>>| resource.push(tag)
     }
 
     #[test]
