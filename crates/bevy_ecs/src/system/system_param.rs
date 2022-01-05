@@ -6,7 +6,8 @@ use crate::{
     component::{Component, ComponentId, ComponentTicks, Components},
     entity::{Entities, Entity},
     query::{
-        Access, FilterFetch, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyFetch, WorldQuery,
+        Access, FilterFetch, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyFetch,
+        WorldQuery,
     },
     system::{CommandQueue, Commands, Query, SystemMeta},
     world::{FromWorld, World},
@@ -1201,7 +1202,10 @@ unsafe impl<'w, 's> SystemParamState for MutWorldState {
         let mut access = Access::default();
         access.write_all();
 
-        if !(system_meta.archetype_component_access.is_compatible(&access)) {
+        if !(system_meta
+            .archetype_component_access
+            .is_compatible(&access))
+        {
             panic!("&mut World conflicts with a previous mutable system parameter. Allowing this would break Rust's mutability rules");
         }
 
@@ -1210,7 +1214,11 @@ unsafe impl<'w, 's> SystemParamState for MutWorldState {
         let mut filtered_access = FilteredAccess::default();
 
         filtered_access.write_all();
-        if !system_meta.component_access_set.get_conflicts(&filtered_access).is_empty() {
+        if !system_meta
+            .component_access_set
+            .get_conflicts(&filtered_access)
+            .is_empty()
+        {
             panic!("&mut World conflicts with a previous mutable system parameter. Allowing this would break Rust's mutability rules");
         }
         system_meta.component_access_set.add(filtered_access);
@@ -1227,7 +1235,7 @@ impl<'w, 's> SystemParamFetch<'w, 's> for MutWorldState {
         _state: &'s mut Self,
         _system_meta: &SystemMeta,
         world: &'w World,
-        _change_tick: u32, 
+        _change_tick: u32,
     ) -> Self::Item {
         // this is unsound. don't allow into production
         unsafe {

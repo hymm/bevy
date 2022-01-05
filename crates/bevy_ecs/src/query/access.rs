@@ -74,7 +74,7 @@ impl<T: SparseSetIndex> Access<T> {
     pub fn reads_all(&self) -> bool {
         self.reads_all
     }
-    
+
     /// Sets this `Access` to having write access for all indices.
     pub fn write_all(&mut self) {
         self.writes_all = true;
