@@ -7,8 +7,8 @@ use crate::{
         SystemContainer, SystemDescriptor,
     },
     schedule_v2::{
-        executor::SharedSystemAccess,
         one_shot_notify::{one_shot_notify, Receiver as NotifyReceiver, Sender as NotifySender},
+        shared_system_access::SharedSystemAccess,
     },
     world::World,
 };
@@ -81,6 +81,9 @@ impl Schedule {
             self.rebuild_cached_data();
             self.systems_modified = false;
         }
+
+        self.update_archetypes(world);
+        
         // put async_scope in an async block to throw away value
         scope.async_scope(move |scope| self.spawn_systems(scope, world, shared_access))
     }
