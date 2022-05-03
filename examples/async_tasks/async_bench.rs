@@ -66,6 +66,17 @@ fn main() {
             .add_system(handle_tasks_system)
             .run();
     }
+
+    App::new()
+        .insert_resource(ScheduleRunnerSettings::run_loop(Duration::from_secs_f64(
+            FRAME_STEP,
+        )))
+        .insert_resource(FrameCounter { n_frames: 0 })
+        .add_plugins(MinimalPlugins)
+        .add_startup_system(spawn_tasks_async_channel)
+        .add_system_to_stage(CoreStage::First, count_frame)
+        .add_system(handle_tasks_async_channel)
+        .run();
 }
 
 fn spawn_tasks(mut commands: Commands, thread_pool: Res<AsyncComputeTaskPool>) {
@@ -303,6 +314,78 @@ fn handle_tasks_noop_waker(
     }
     if n_tasks == 0 {
         print_statistics("noop_waker", &frame_counter, &time);
+        app_exit_events.send(AppExit);
+    }
+}
+
+use async_channel::{bounded, Receiver, TryRecvError};
+
+/// A pollable task whose result readiness can be checked in system functions
+/// on every frame update without blocking on a future
+#[derive(Debug)]
+pub struct PollableTask<T> {
+    receiver: Receiver<T>,
+    // this is to keep the task alive
+    _task: Task<()>,
+}
+
+impl<T> PollableTask<T> {
+    pub(crate) fn new(receiver: Receiver<T>, task: Task<()>) -> Self {
+        Self {
+            receiver,
+            _task: task,
+        }
+    }
+
+    /// poll to see whether the task finished
+    pub fn poll(&self) -> Option<T> {
+        match self.receiver.try_recv() {
+            Ok(value) => Some(value),
+            Err(try_error) => match try_error {
+                TryRecvError::Empty => None,
+                TryRecvError::Closed => {
+                    panic!("Polling on the task failed because the connection was already closed.")
+                }
+            },
+        }
+    }
+}
+
+fn spawn_tasks_async_channel(mut commands: Commands, thread_pool: Res<AsyncComputeTaskPool>) {
+    for step in 0..N_STEPS {
+        for _i in 0..N_TASKS {
+            let (sender, receiver) = bounded(1);
+            let task = thread_pool.spawn(async move {
+                let start_time = Instant::now();
+                let duration = Duration::from_secs_f32(TASK_DURATION_SEC * (step as f32));
+                while Instant::now() - start_time < duration {
+                    futures_timer::Delay::new(Duration::from_secs_f32(0.1)).await;
+                }
+                sender.send(()).await.unwrap();
+                // println!("spawn_tasks_noop_waker");
+            });
+            let wrapper = PollableTask::<()>::new(receiver, task);
+            commands.spawn().insert(wrapper);
+        }
+    }
+}
+
+fn handle_tasks_async_channel(
+    mut commands: Commands,
+    mut transform_tasks: Query<(Entity, &mut PollableTask<()>)>,
+    mut app_exit_events: EventWriter<AppExit>,
+    time: Res<Time>,
+    frame_counter: Res<FrameCounter>,
+) {
+    let mut n_tasks = 0;
+    for (entity, task) in transform_tasks.iter_mut() {
+        n_tasks += 1;
+        if task.poll().is_some() {
+            commands.entity(entity).remove::<PollableTask<()>>();
+        }
+    }
+    if n_tasks == 0 {
+        print_statistics("async_channel", &frame_counter, &time);
         app_exit_events.send(AppExit);
     }
 }
