@@ -32,7 +32,7 @@ pub mod prelude {
     pub use crate::{
         iter::ParallelIterator,
         slice::{ParallelSlice, ParallelSliceMut},
-        TaskGroup,
+        TaskGroup
     };
 }
 

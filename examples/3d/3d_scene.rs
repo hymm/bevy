@@ -1,9 +1,24 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
-use bevy::prelude::*;
+use bevy::{prelude::*, tasks::TaskPoolBuilder, window::PresentMode};
 
 fn main() {
     App::new()
+        .insert_resource(WindowDescriptor {
+            present_mode: PresentMode::Immediate,
+            ..default()
+        })
+        .insert_resource(
+            TaskPoolBuilder::new()
+                .threads(12)
+                .io(|builder| {
+                    builder.percent(0.0).min_threads(0);
+                })
+                .async_compute(|builder| {
+                    builder.percent(0.0).min_threads(0);
+                })
+                .build(),
+        )
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
