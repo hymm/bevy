@@ -12,10 +12,13 @@ fn main() {
             TaskPoolBuilder::new()
                 .threads(12)
                 .io(|builder| {
-                    builder.percent(0.0).min_threads(0);
+                    builder.percent(0.0).min_threads(0).max_threads(12);
                 })
                 .async_compute(|builder| {
-                    builder.percent(0.0).min_threads(0);
+                    builder.percent(1.0).min_threads(0).max_threads(12);
+                })
+                .compute(|builder| {
+                    builder.percent(0.0).min_threads(0).max_threads(12);
                 })
                 .build(),
         )
