@@ -211,10 +211,6 @@ impl TaskPool {
         F: FnOnce(&mut Scope<'scope, T>) + 'scope + Send,
         T: Send + 'static,
     {
-        if self.thread_count_for(group) == 0 {
-            tracing::error!("Attempting to use TaskPool::scope with the {:?} task group, but there are no threads for it!",
-                            group);
-        }
         // SAFETY: This function blocks until all futures complete, so this future must return
         // before this function returns. However, rust has no way of knowing
         // this so we must convert to 'static here to appease the compiler as it is unable to
