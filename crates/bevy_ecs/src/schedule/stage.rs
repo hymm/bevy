@@ -851,6 +851,10 @@ impl Stage for SystemStage {
                     }
                 }
 
+                #[cfg(feature = "trace")]
+                let _parallel_span =
+                    bevy_utils::tracing::info_span!("run parallel systems")
+                        .entered();
                 // Run parallel systems using the executor.
                 // TODO: hard dependencies, nested sets, whatever... should be evaluated here.
                 for container in &mut self.parallel {
@@ -858,6 +862,9 @@ impl Stage for SystemStage {
                         should_run(container, &self.run_criteria, default_should_run);
                 }
                 self.executor.run_systems(&mut self.parallel, world);
+
+                #[cfg(feature = "trace")]
+                drop(_parallel_span);
 
                 // Run systems that want to be between parallel systems and their command buffers.
                 for container in &mut self.exclusive_before_commands {
