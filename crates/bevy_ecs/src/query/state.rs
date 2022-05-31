@@ -11,7 +11,6 @@ use crate::{
     world::{World, WorldId},
 };
 use bevy_tasks::{TaskGroup, TaskPool};
-use bevy_tasks::{ComputeTaskPool, TaskPool};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
 use fixedbitset::FixedBitSet;
@@ -64,7 +63,7 @@ impl<Q: WorldQuery, F: WorldQuery> QueryState<Q, F> {
         let mut state = Self {
             world_id: world.id(),
             task_pool: world
-                .get_resource::<ComputeTaskPool>()
+                .get_resource::<TaskPool>()
                 .map(|task_pool| task_pool.deref().clone()),
             archetype_generation: ArchetypeGeneration::initial(),
             matched_table_ids: Vec::new(),
@@ -871,7 +870,7 @@ impl<Q: WorldQuery, F: WorldQuery> QueryState<Q, F> {
         self.task_pool
             .as_ref()
             .expect("Cannot iterate query in parallel. No ComputeTaskPool initialized.")
-            .scope(|scope| {
+            .scope(TaskGroup::Compute, |scope| {
                 if QF::IS_DENSE && <QueryFetch<'static, F>>::IS_DENSE {
                     let tables = &world.storages().tables;
                     for table_id in &self.matched_table_ids {
