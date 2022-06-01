@@ -1,6 +1,19 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
 use bevy::{prelude::*, tasks::TaskPoolBuilder, window::PresentMode};
+use bevy::utils::tracing::info_span;
+
+#[derive(Component, Copy, Clone)]
+struct Position(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Rotation(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Velocity(Vec3);
+
+#[derive(Component, Copy, Clone)]
+struct Transformed(Mat4);
 
 fn main() {
     App::new()
@@ -10,21 +23,42 @@ fn main() {
         })
         .insert_resource(
             TaskPoolBuilder::new()
-                .threads(12)
+                .threads(11)
                 .io(|builder| {
                     builder.percent(0.0).min_threads(0).max_threads(12);
                 })
                 .async_compute(|builder| {
-                    builder.percent(1.0).min_threads(0).max_threads(12);
+                    builder.percent(0.0).min_threads(0).max_threads(12);
                 })
                 .compute(|builder| {
-                    builder.percent(0.0).min_threads(0).max_threads(12);
+                    builder.percent(1.0).min_threads(0).max_threads(12);
                 })
                 .build(),
         )
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
+        .add_startup_system(|mut commands: Commands| {
+            commands.spawn_batch((0..1000).map(|_| {
+                (
+                    Transformed(Mat4::from_axis_angle(Vec3::X, 1.2)),
+                    Position(Vec3::X),
+                    Rotation(Vec3::X),
+                    Velocity(Vec3::X),
+                )
+            }))
+        })
+        .add_system(|mut query: Query<(&mut Position, &mut Transformed)>| {
+            query.par_for_each_mut(10, |(mut pos, mut mat)| {
+                let _guard = info_span!("par closure").entered();
+
+                for _ in 0..100 {
+                    mat.0 = mat.0.inverse();
+                }
+
+                pos.0 = mat.0.transform_vector3(pos.0);
+            });
+        })
         .run();
 }
 
