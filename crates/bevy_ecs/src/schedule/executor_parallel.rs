@@ -258,6 +258,9 @@ impl ParallelExecutor {
                     scope.spawn(task);
                 } else {
                     scope.spawn_on_scope(task);
+                    // yield the executor in case the executor is running on the main thread
+                    // to allow progress on the local task
+                    futures_lite::future::yield_now().await;
                 }
 
                 self.running.set(index, true);
