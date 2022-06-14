@@ -118,39 +118,50 @@ impl ParallelSystemExecutor for ParallelExecutor {
             }
         }
 
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("parallel scope").entered();
-        ComputeTaskPool::init(TaskPool::default).scope(|scope| {
-            self.prepare_systems(systems);
-            let parallel_executor = async {
-                // All systems have been ran if there are no queued or running systems.
-                while 0 != self.queued.count_ones(..) + self.running.count_ones(..) {
-                    self.process_queued_systems(scope, systems, world).await;
-                    // Avoid deadlocking if no systems were actually started.
-                    if self.running.count_ones(..) != 0 {
-                        // Wait until at least one system has finished.
-                        let index = self
-                            .finish_receiver
-                            .recv()
-                            .await
-                            .unwrap_or_else(|error| unreachable!("{}", error));
-                        self.process_finished_system(index);
-                        // Gather other systems than may have finished.
-                        while let Ok(index) = self.finish_receiver.try_recv() {
-                            self.process_finished_system(index);
-                        }
-                        // At least one system has finished, so active access is outdated.
-                        self.rebuild_active_access();
-                    }
-                    self.update_counters_and_queue_systems();
+        match systems.len() {
+            0 => {}
+            1 => {
+                if systems[0].should_run() {
+                    // we don't need to check dependencies since there's only one system
+                    systems[0].system_mut().run((), world);
                 }
-            };
-            #[cfg(feature = "trace")]
-            let span = bevy_utils::tracing::info_span!("parallel executor");
-            #[cfg(feature = "trace")]
-            let parallel_executor = parallel_executor.instrument(span);
-            scope.spawn(parallel_executor);
-        });
+            }
+            _ => {
+                #[cfg(feature = "trace")]
+                let _span = bevy_utils::tracing::info_span!("parallel scope").entered();
+                ComputeTaskPool::init(TaskPool::default).scope(|scope| {
+                    self.prepare_systems(systems);
+                    let parallel_executor = async {
+                        // All systems have been ran if there are no queued or running systems.
+                        while 0 != self.queued.count_ones(..) + self.running.count_ones(..) {
+                            self.process_queued_systems(scope, systems, world).await;
+                            // Avoid deadlocking if no systems were actually started.
+                            if self.running.count_ones(..) != 0 {
+                                // Wait until at least one system has finished.
+                                let index = self
+                                    .finish_receiver
+                                    .recv()
+                                    .await
+                                    .unwrap_or_else(|error| unreachable!("{}", error));
+                                self.process_finished_system(index);
+                                // Gather other systems than may have finished.
+                                while let Ok(index) = self.finish_receiver.try_recv() {
+                                    self.process_finished_system(index);
+                                }
+                                // At least one system has finished, so active access is outdated.
+                                self.rebuild_active_access();
+                            }
+                            self.update_counters_and_queue_systems();
+                        }
+                    };
+                    #[cfg(feature = "trace")]
+                    let span = bevy_utils::tracing::info_span!("parallel executor");
+                    #[cfg(feature = "trace")]
+                    let parallel_executor = parallel_executor.instrument(span);
+                    scope.spawn(parallel_executor);
+                });
+            }
+        }
     }
 }
 
