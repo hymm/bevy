@@ -185,6 +185,7 @@ impl ParallelExecutor {
         }
     }
 
+    #[inline(always)]
     fn get_system_future<'scope>(
         system: &'scope mut ParallelSystemContainer,
         index: usize,
@@ -217,6 +218,7 @@ impl ParallelExecutor {
     }
 
     /// Determines if the system with given index has no conflicts with already running systems.
+    #[inline(always)]
     fn can_start_now(
         non_send_running: bool,
         system_data: &SystemSchedulingMetadata,
