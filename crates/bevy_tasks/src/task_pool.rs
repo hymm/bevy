@@ -182,7 +182,7 @@ impl TaskPool {
                         }
                     };
 
-                    executor.run(tick_forever.or(get_results)).await
+                    executor.run(tick_forever).or(get_results).await
                 })
             }
         })
