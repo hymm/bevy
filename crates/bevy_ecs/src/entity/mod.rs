@@ -260,6 +260,7 @@ impl<'a> core::iter::FusedIterator for ReserveEntitiesIterator<'a> {}
 
 #[derive(Debug, Default)]
 pub struct Entities {
+    /// index into `meta` corresponds to the entity id
     pub(crate) meta: Vec<EntityMeta>,
 
     /// The `pending` and `free_cursor` fields describe three sets of Entity IDs
@@ -627,6 +628,18 @@ impl Entities {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    /// Iterates over entities in valid archetypes
+    pub fn iter(&'_ self) -> impl Iterator + '_ {
+        self.meta
+            .iter()
+            .enumerate()
+            .filter(|(_, meta)| meta.location.archetype_id != ArchetypeId::INVALID)
+            .map(|(index, meta)| Entity {
+                generation: meta.generation,
+                id: index as u32,
+            })
     }
 }
 
