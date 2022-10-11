@@ -630,8 +630,8 @@ impl Entities {
         self.len == 0
     }
 
-    /// Iterates over entities in valid archetypes
-    pub fn iter(&'_ self) -> impl Iterator + '_ {
+    /// Returns an iterator over entities in valid archetypes
+    pub fn iter(&'_ self) -> impl Iterator<Item = Entity> + '_ {
         self.meta
             .iter()
             .enumerate()
@@ -724,5 +724,40 @@ mod tests {
 
         const C4: u32 = Entity::from_bits(0x00dd_00ff_0000_0000).generation();
         assert_eq!(0x00dd_00ff, C4);
+    }
+
+    #[test]
+    fn entities_iter() {
+        let mut entities = Entities::default();
+
+        // setup some entities with valid archetypes
+        let reserved = entities.reserve_entities(10);
+        let mut reserved = reserved.skip(4);
+        let e1_id = reserved.next().unwrap().id;
+        let e2_id = reserved.next().unwrap().id;
+        // SAFETY: entity_location is left invalid
+        unsafe { entities.flush(|_, _| {}) };
+        entities.meta[e1_id as usize].location = EntityLocation {
+            archetype_id: ArchetypeId::new(1),
+            index: 0,
+        };
+
+        entities.meta[e2_id as usize].location = EntityLocation {
+            archetype_id: ArchetypeId::new(1),
+            index: 1,
+        };
+
+        // check that only the entities with valid archetypes are returned
+        let mut iter = entities.iter();
+        let e = iter.next().unwrap();
+        assert_eq!(e.generation, 0);
+        assert_eq!(e.id, 4);
+
+        let e = iter.next().unwrap();
+        assert_eq!(e.generation, 0);
+        assert_eq!(e.id, 5);
+
+        let e = iter.next();
+        assert_eq!(e, None);
     }
 }
