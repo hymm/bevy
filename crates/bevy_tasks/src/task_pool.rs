@@ -279,27 +279,12 @@ impl TaskPool {
             // Pin the futures on the stack.
             pin!(get_results);
 
-            // SAFETY: This function blocks until all futures complete, so we do not read/write
-            // the data from futures outside of the 'scope lifetime. However,
-            // rust has no way of knowing this so we must convert to 'static
-            // here to appease the compiler as it is unable to validate safety.
-            let get_results: Pin<&mut (dyn Future<Output = Vec<T>> + 'static + Send)> = get_results;
-            let get_results: Pin<&'static mut (dyn Future<Output = Vec<T>> + 'static + Send)> =
-                unsafe { mem::transmute(get_results) };
-
-            // The thread that calls scope() will participate in driving tasks in the pool
-            // forward until the tasks that are spawned by this scope() call
-            // complete. (If the caller of scope() happens to be a thread in
-            // this thread pool, and we only have one thread in the pool, then
-            // simply calling future::block_on(spawned) would deadlock.)
-            let mut spawned = task_scope_executor.spawn(get_results);
-
             loop {
-                if let Some(result) = future::block_on(future::poll_once(&mut spawned)) {
+                if let Some(result) = future::block_on(future::poll_once(&mut get_results)) {
                     break result;
                 };
 
-                self.executor.try_tick();
+                executor.try_tick();
                 task_scope_executor.try_tick();
             }
         }
@@ -607,5 +592,22 @@ mod tests {
         barrier.wait();
         assert!(!thread_check_failed.load(Ordering::Acquire));
         assert_eq!(count.load(Ordering::Acquire), 200);
+    }
+
+    #[test]
+    fn can_complete_with_one_thread() {
+        let pool = Arc::new(TaskPoolBuilder::new().num_threads(1).build());
+        let count = Arc::new(AtomicI32::new(0));
+        pool.scope(|s| {
+            s.spawn(async {
+                pool.scope(|s| {
+                    s.spawn(async {
+                        count.fetch_add(1, Ordering::Release);
+                    })
+                });
+            });
+        });
+
+        assert_eq!(count.load(Ordering::Acquire), 1);
     }
 }
