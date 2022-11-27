@@ -2,14 +2,17 @@ use std::{
     future::Future,
     marker::PhantomData,
     mem,
-    sync::{atomic::{AtomicUsize, Ordering}, Arc},
     pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
-use tokio::task::JoinHandle;
-use tokio::runtime::{Runtime, Builder};
 use concurrent_queue::ConcurrentQueue;
 use futures_lite::{future, pin};
+use tokio::runtime::{Builder, Runtime};
+use tokio::task::JoinHandle;
 
 use crate::tokio_task::Task;
 
@@ -66,7 +69,9 @@ impl TaskPoolBuilder {
     /// Creates a new [`TaskPool`] based on the current options.
     pub fn build(mut self) -> TaskPool {
         TaskPool {
-            thread_count: self.thread_count.unwrap_or_else(crate::available_parallelism),
+            thread_count: self
+                .thread_count
+                .unwrap_or_else(crate::available_parallelism),
             runtime: self.builder.build().unwrap(),
         }
     }
@@ -81,6 +86,10 @@ pub struct TaskPool {
 }
 
 impl TaskPool {
+    thread_local! {
+        static LOCAL_RUNTIME: Runtime = Builder::new_current_thread().build().unwrap();
+    }
+
     /// Create a `TaskPool` with the default configuration.
     pub fn new() -> Self {
         TaskPoolBuilder::new().build()
@@ -178,57 +187,59 @@ impl TaskPool {
         F: for<'scope> FnOnce(&'scope Scope<'scope, 'env, T>),
         T: Send + 'static,
     {
-        // SAFETY: This safety comment applies to all references transmuted to 'env.
-        // Any futures spawned with these references need to return before this function completes.
-        // This is guaranteed because we drive all the futures spawned onto the Scope
-        // to completion in this function. However, rust has no way of knowing this so we
-        // transmute the lifetimes to 'env here to appease the compiler as it is unable to validate safety.
-        let runtime: &Runtime = &self.runtime;
-        let runtime: &'env Runtime = unsafe { mem::transmute(runtime) };
-        let task_scope_runtime: Runtime = Builder::new_current_thread().build().unwrap();
-        let task_scope_runtime: &'env Runtime =
-            unsafe { mem::transmute(&task_scope_runtime) };
-        let spawned: ConcurrentQueue<JoinHandle<T>> = ConcurrentQueue::unbounded();
-        let spawned_ref: &'env ConcurrentQueue<JoinHandle<T>> =
-            unsafe { mem::transmute(&spawned) };
+        Self::LOCAL_RUNTIME.with(|local_runtime| {
+            // SAFETY: This safety comment applies to all references transmuted to 'env.
+            // Any futures spawned with these references need to return before this function completes.
+            // This is guaranteed because we drive all the futures spawned onto the Scope
+            // to completion in this function. However, rust has no way of knowing this so we
+            // transmute the lifetimes to 'env here to appease the compiler as it is unable to validate safety.
+            let runtime: &Runtime = &self.runtime;
+            let runtime: &'env Runtime = unsafe { mem::transmute(runtime) };
+            let local_runtime: &'env Runtime = unsafe { mem::transmute(local_runtime) };
+            let spawned: ConcurrentQueue<JoinHandle<T>> = ConcurrentQueue::unbounded();
+            let spawned_ref: &'env ConcurrentQueue<JoinHandle<T>> =
+                unsafe { mem::transmute(&spawned) };
 
-        let scope = Scope {
-            runtime,
-            task_scope_runtime,
-            spawned: spawned_ref,
-            scope: PhantomData,
-            env: PhantomData,
-        };
-
-        let scope_ref: &'env Scope<'_, 'env, T> = unsafe { mem::transmute(&scope) };
-
-        f(scope_ref);
-
-        if spawned.is_empty() {
-            Vec::new()
-        } else {
-            let get_results = async {
-                let mut results = Vec::with_capacity(spawned_ref.len());
-                while let Ok(task) = spawned_ref.pop() {
-                    results.push(task.await.unwrap());
-                }
-
-                results
+            let scope = Scope {
+                runtime,
+                local_runtime,
+                spawned: spawned_ref,
+                scope: PhantomData,
+                env: PhantomData,
             };
 
-            // Pin the futures on the stack.
-            pin!(get_results);
+            let scope_ref: &'env Scope<'_, 'env, T> = unsafe { mem::transmute(&scope) };
 
-            let _guard = task_scope_runtime.enter();
-            loop {
-                if let Some(result) = self.runtime.block_on(future::poll_once(&mut get_results)) {
-                    break result;
-                }
-                if let Some(result) = task_scope_runtime.block_on(future::poll_once(&mut get_results)) {
-                    break result;
+            f(scope_ref);
+
+            if spawned.is_empty() {
+                Vec::new()
+            } else {
+                let get_results = async {
+                    let mut results = Vec::with_capacity(spawned_ref.len());
+                    while let Ok(task) = spawned_ref.pop() {
+                        results.push(task.await.unwrap());
+                    }
+
+                    results
+                };
+
+                // Pin the futures on the stack.
+                pin!(get_results);
+
+                loop {
+                    // if let Some(result) = self.runtime.block_on(crate::poll_ten::poll_ten(&mut get_results)) {
+                    //     break result;
+                    // }
+                    let _guard = local_runtime.enter();
+                    if let Some(result) =
+                    local_runtime.block_on(crate::poll_ten::poll_ten(&mut get_results))
+                    {
+                        break result;
+                    }
                 }
             }
-        }
+        })
     }
 
     /// Spawns a static future onto the thread pool. The returned Task is a future. It can also be
@@ -288,7 +299,7 @@ impl Default for TaskPool {
 #[derive(Debug)]
 pub struct Scope<'scope, 'env: 'scope, T> {
     runtime: &'scope Runtime,
-    task_scope_runtime: &'scope Runtime,
+    local_runtime: &'scope Runtime,
     spawned: &'scope ConcurrentQueue<JoinHandle<T>>,
     // make `Scope` invariant over 'scope and 'env
     scope: PhantomData<&'scope mut &'scope ()>,
@@ -306,8 +317,7 @@ impl<'scope, 'env, T: Send + 'static> Scope<'scope, 'env, T> {
     /// For more information, see [`TaskPool::scope`].
     pub fn spawn<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
         let fut: Pin<Box<dyn Future<Output = T> + 'scope + Send>> = Box::pin(f);
-        let fut: Pin<Box<dyn Future<Output = T> + 'static + Send>> = 
-            unsafe { mem::transmute(fut) };
+        let fut: Pin<Box<dyn Future<Output = T> + 'static + Send>> = unsafe { mem::transmute(fut) };
         let task = self.runtime.spawn(fut);
         // ConcurrentQueue only errors when closed or full, but we never
         // close and use an unbouded queue, so it is safe to unwrap
@@ -324,9 +334,8 @@ impl<'scope, 'env, T: Send + 'static> Scope<'scope, 'env, T> {
     /// For more information, see [`TaskPool::scope`].
     pub fn spawn_on_scope<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
         let fut: Pin<Box<dyn Future<Output = T> + 'scope + Send>> = Box::pin(f);
-        let fut: Pin<Box<dyn Future<Output = T> + 'static + Send>> = 
-            unsafe { mem::transmute(fut) };
-        let task = self.task_scope_runtime.spawn(fut);
+        let fut: Pin<Box<dyn Future<Output = T> + 'static + Send>> = unsafe { mem::transmute(fut) };
+        let task = self.local_runtime.spawn(fut);
         // ConcurrentQueue only errors when closed or full, but we never
         // close and use an unbouded queue, so it is safe to unwrap
         if let Err(err) = self.spawned.push(task) {
@@ -544,5 +553,21 @@ mod tests {
         barrier.wait();
         assert!(!thread_check_failed.load(Ordering::Acquire));
         assert_eq!(count.load(Ordering::Acquire), 200);
+    }
+
+    #[test]
+    fn test_nested_scopes() {
+        let pool = Arc::new(TaskPool::new());
+        let outputs: Vec<i32> = pool.clone().scope(|scope| {
+            scope.spawn(async move {
+                let inner_results = pool.scope(|scope| {
+                    scope.spawn(async move { 1 });
+                });
+                assert_eq!(inner_results, vec![1]);
+                0
+            });
+        });
+
+        assert_eq!(outputs, vec![0]);
     }
 }
