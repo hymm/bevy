@@ -1,7 +1,10 @@
 use core::fmt;
-use std::{task::{Context, Poll}, pin::Pin};
 use futures_lite::Future;
 use pin_project_lite::pin_project;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 /// Polls a future just once and returns an [`Option`] with the result.
 pub fn poll_ten<T, F>(f: F) -> PollTen<F>
@@ -40,7 +43,6 @@ where
             Poll::Ready(t) => Poll::Ready(Some(t)),
             Poll::Pending => {
                 if *this.count < 10 {
-                    dbg!("count");
                     *this.count += 1;
                     Poll::Pending
                 } else {

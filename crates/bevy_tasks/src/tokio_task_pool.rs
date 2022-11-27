@@ -4,7 +4,7 @@ use std::{
     mem,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -73,6 +73,7 @@ impl TaskPoolBuilder {
                 .thread_count
                 .unwrap_or_else(crate::available_parallelism),
             runtime: self.builder.build().unwrap(),
+            current_runtime_running: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -83,6 +84,7 @@ impl TaskPoolBuilder {
 pub struct TaskPool {
     runtime: Runtime,
     thread_count: usize,
+    current_runtime_running: Arc<AtomicBool>,
 }
 
 impl TaskPool {
@@ -227,16 +229,14 @@ impl TaskPool {
                 // Pin the futures on the stack.
                 pin!(get_results);
 
-                loop {
-                    // if let Some(result) = self.runtime.block_on(crate::poll_ten::poll_ten(&mut get_results)) {
-                    //     break result;
-                    // }
-                    let _guard = local_runtime.enter();
-                    if let Some(result) =
-                    local_runtime.block_on(crate::poll_ten::poll_ten(&mut get_results))
-                    {
-                        break result;
-                    }
+                let is_ticking = self.current_runtime_running.load(Ordering::Relaxed);
+                if is_ticking {
+                    tokio::task::block_in_place(move || runtime.block_on(&mut get_results))
+                } else {
+                    self.current_runtime_running.store(true, Ordering::Relaxed);
+                    let result = local_runtime.block_on(&mut get_results);
+                    self.current_runtime_running.store(false, Ordering::Relaxed);
+                    result
                 }
             }
         })
