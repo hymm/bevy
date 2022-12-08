@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_task::FallibleTask;
+use bumpalo::Bump;
 use concurrent_queue::ConcurrentQueue;
 use futures_lite::{future, pin, FutureExt};
 
@@ -238,6 +239,16 @@ impl TaskPool {
         F: for<'scope> FnOnce(&'scope Scope<'scope, 'env, T>),
         T: Send + 'static,
     {
+        let arena = Bump::new();
+        self.scope_with_bump(&arena, f)
+    }
+
+    /// TODO: blah blah
+    pub fn scope_with_bump<'env, F, T>(&self, arena: &Bump, f: F) -> Vec<T>
+    where
+        F: for<'scope> FnOnce(&'scope Scope<'scope, 'env, T>),
+        T: Send + 'static,
+    {
         // SAFETY: This safety comment applies to all references transmuted to 'env.
         // Any futures spawned with these references need to return before this function completes.
         // This is guaranteed because we drive all the futures spawned onto the Scope
@@ -248,9 +259,10 @@ impl TaskPool {
         let task_scope_executor = &async_executor::Executor::default();
         let task_scope_executor: &'env async_executor::Executor =
             unsafe { mem::transmute(task_scope_executor) };
-        let spawned: ConcurrentQueue<FallibleTask<T>> = ConcurrentQueue::unbounded();
+        let spawned: &mut ConcurrentQueue<FallibleTask<T>> =
+            arena.alloc(ConcurrentQueue::unbounded());
         let spawned_ref: &'env ConcurrentQueue<FallibleTask<T>> =
-            unsafe { mem::transmute(&spawned) };
+            unsafe { mem::transmute(&*spawned) };
 
         let scope = Scope {
             executor,

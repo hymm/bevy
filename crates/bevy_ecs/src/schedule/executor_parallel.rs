@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
@@ -8,6 +10,7 @@ use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
+use bumpalo::Bump;
 use event_listener::Event;
 use fixedbitset::FixedBitSet;
 
@@ -49,6 +52,7 @@ pub struct ParallelExecutor {
     active_archetype_component_access: Access<ArchetypeComponentId>,
     /// Scratch space to avoid reallocating a vector when updating dependency counters.
     dependants_scratch: Vec<usize>,
+    arena: Option<Arc<Mutex<Bump>>>,
     #[cfg(test)]
     events_sender: Option<Sender<SchedulingEvent>>,
 }
@@ -70,6 +74,7 @@ impl Default for ParallelExecutor {
             should_run: Default::default(),
             active_archetype_component_access: Default::default(),
             dependants_scratch: Default::default(),
+            arena: Some(Arc::new(Mutex::new(Bump::new()))),
             #[cfg(test)]
             events_sender: None,
         }
@@ -124,7 +129,10 @@ impl ParallelSystemExecutor for ParallelExecutor {
             }
         }
 
-        ComputeTaskPool::init(TaskPool::default).scope(|scope| {
+        let arena_mutex = self.arena.take().unwrap();
+        let mut arena = arena_mutex.lock().unwrap();
+
+        ComputeTaskPool::init(TaskPool::default).scope_with_bump(&*arena, |scope| {
             self.prepare_systems(scope, systems, world);
             if self.should_run.count_ones(..) == 0 {
                 return;
@@ -158,6 +166,9 @@ impl ParallelSystemExecutor for ParallelExecutor {
             let parallel_executor = parallel_executor.instrument(span);
             scope.spawn(parallel_executor);
         });
+        arena.reset();
+        drop(arena);
+        self.arena = Some(arena_mutex);
     }
 }
 
