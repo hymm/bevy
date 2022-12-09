@@ -168,7 +168,7 @@ impl ParallelSystemExecutor for ParallelExecutor {
         });
         arena.reset();
         drop(arena);
-        self.arena = Some(arena_mutex);
+        self.arena.replace(arena_mutex);
     }
 }
 

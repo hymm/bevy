@@ -256,9 +256,9 @@ impl TaskPool {
         // transmute the lifetimes to 'env here to appease the compiler as it is unable to validate safety.
         let executor: &async_executor::Executor = &self.executor;
         let executor: &'env async_executor::Executor = unsafe { mem::transmute(executor) };
-        let task_scope_executor = &async_executor::Executor::default();
+        let task_scope_executor = arena.alloc(async_executor::Executor::default());
         let task_scope_executor: &'env async_executor::Executor =
-            unsafe { mem::transmute(task_scope_executor) };
+            unsafe { mem::transmute(&*task_scope_executor) };
         let spawned: &mut ConcurrentQueue<FallibleTask<T>> =
             arena.alloc(ConcurrentQueue::unbounded());
         let spawned_ref: &'env ConcurrentQueue<FallibleTask<T>> =
