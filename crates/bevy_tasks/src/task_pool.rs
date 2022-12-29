@@ -309,6 +309,8 @@ impl TaskPool {
     
                     results
                 };
+
+                let get_results_task = task_scope_executor.spawn(get_results);
     
                 let execute_forever = async move {
                     loop {
@@ -322,7 +324,7 @@ impl TaskPool {
                     }
                 };
     
-                execute_forever.or(get_results).await
+                execute_forever.or(get_results_task).await
             })
         }
     }
