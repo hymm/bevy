@@ -3,12 +3,12 @@ use std::{
     marker::PhantomData,
     mem,
     sync::Arc,
-    thread::{self, JoinHandle},
+    thread::{self, JoinHandle}, panic::AssertUnwindSafe,
 };
 
 use async_task::FallibleTask;
 use concurrent_queue::ConcurrentQueue;
-use futures_lite::{future, pin, FutureExt};
+use futures_lite::{future, FutureExt};
 
 use crate::Task;
 
@@ -300,29 +300,30 @@ impl TaskPool {
         if spawned.is_empty() {
             Vec::new()
         } else {
-            let get_results = async {
-                let mut results = Vec::with_capacity(spawned_ref.len());
-                while let Ok(task) = spawned_ref.pop() {
-                    results.push(task.await.unwrap());
-                }
-
-                results
-            };
-
-            // Pin the futures on the stack.
-            pin!(get_results);
-
-            loop {
-                if let Some(result) = future::block_on(future::poll_once(&mut get_results)) {
-                    break result;
+            future::block_on(async move {
+                let get_results = async {
+                    let mut results = Vec::with_capacity(spawned_ref.len());
+                    while let Ok(task) = spawned_ref.pop() {
+                        results.push(task.await.unwrap());
+                    }
+    
+                    results
                 };
+    
+                let execute_forever = async move {
+                    loop {
+                        let tick_forever = async move {
+                            loop {
+                                task_scope_executor.tick().await;
+                            }
+                        };
 
-                std::panic::catch_unwind(|| {
-                    executor.try_tick();
-                    task_scope_executor.try_tick();
-                })
-                .ok();
-            }
+                        let _result = AssertUnwindSafe(executor.run(tick_forever)).catch_unwind().await.is_ok();
+                    }
+                };
+    
+                execute_forever.or(get_results).await
+            })
         }
     }
 
