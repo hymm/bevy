@@ -1,5 +1,6 @@
 mod render_layers;
 
+use bevy_tasks::ComputeTaskPool;
 pub use render_layers::*;
 
 use bevy_app::{CoreStage, Plugin};
@@ -360,7 +361,8 @@ const VISIBLE_ENTITIES_QUERY_BATCH_SIZE: usize = 1024;
 /// [`ComputedVisibility`] of all entities, and for each view also compute the [`VisibleEntities`]
 /// for that view.
 pub fn check_visibility(
-    mut thread_queues: Local<ThreadLocal<Cell<Vec<Entity>>>>,
+    mut aabb_thread_queues: Local<ThreadLocal<Cell<Vec<Entity>>>>,
+    mut no_aabb_thread_queues: Local<ThreadLocal<Cell<Vec<Entity>>>>,
     mut view_query: Query<(&mut VisibleEntities, &Frustum, Option<&RenderLayers>), With<Camera>>,
     mut visible_aabb_query: Query<(
         Entity,
@@ -377,76 +379,85 @@ pub fn check_visibility(
 ) {
     for (mut visible_entities, frustum, maybe_view_mask) in &mut view_query {
         let view_mask = maybe_view_mask.copied().unwrap_or_default();
+        ComputeTaskPool::get().scope(|scope| {
+            scope.spawn(async {
+                visible_aabb_query.par_for_each_mut(
+                    VISIBLE_ENTITIES_QUERY_BATCH_SIZE,
+                    |(
+                        entity,
+                        mut computed_visibility,
+                        maybe_entity_mask,
+                        model_aabb,
+                        transform,
+                        maybe_no_frustum_culling,
+                    )| {
+                        // skip computing visibility for entities that are configured to be hidden. is_visible_in_view has already been set to false
+                        // in visibility_propagate_system
+                        if !computed_visibility.is_visible_in_hierarchy() {
+                            return;
+                        }
+        
+                        let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
+                        if !view_mask.intersects(&entity_mask) {
+                            return;
+                        }
+        
+                        // If we have an aabb and transform, do frustum culling
+                        if maybe_no_frustum_culling.is_none() {
+                            let model = transform.compute_matrix();
+                            let model_sphere = Sphere {
+                                center: model.transform_point3a(model_aabb.center),
+                                radius: transform.radius_vec3a(model_aabb.half_extents),
+                            };
+                            // Do quick sphere-based frustum culling
+                            if !frustum.intersects_sphere(&model_sphere, false) {
+                                return;
+                            }
+                            // If we have an aabb, do aabb-based frustum culling
+                            if !frustum.intersects_obb(model_aabb, &model, false) {
+                                return;
+                            }
+                        }
+        
+                        computed_visibility.set_visible_in_view();
+                        let cell = aabb_thread_queues.get_or_default();
+                        let mut queue = cell.take();
+                        queue.push(entity);
+                        cell.set(queue);
+                    },
+                );
+            });
+
+            scope.spawn(async {
+                visible_no_aabb_query.par_for_each_mut(
+                    VISIBLE_ENTITIES_QUERY_BATCH_SIZE,
+                    |(entity, mut computed_visibility, maybe_entity_mask)| {
+                        // skip computing visibility for entities that are configured to be hidden. is_visible_in_view has already been set to false
+                        // in visibility_propagate_system
+                        if !computed_visibility.is_visible_in_hierarchy() {
+                            return;
+                        }
+        
+                        let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
+                        if !view_mask.intersects(&entity_mask) {
+                            return;
+                        }
+        
+                        computed_visibility.set_visible_in_view();
+                        let cell = no_aabb_thread_queues.get_or_default();
+                        let mut queue = cell.take();
+                        queue.push(entity);
+                        cell.set(queue);
+                    },
+                );
+            });
+        });
+
         visible_entities.entities.clear();
-        visible_aabb_query.par_for_each_mut(
-            VISIBLE_ENTITIES_QUERY_BATCH_SIZE,
-            |(
-                entity,
-                mut computed_visibility,
-                maybe_entity_mask,
-                model_aabb,
-                transform,
-                maybe_no_frustum_culling,
-            )| {
-                // skip computing visibility for entities that are configured to be hidden. is_visible_in_view has already been set to false
-                // in visibility_propagate_system
-                if !computed_visibility.is_visible_in_hierarchy() {
-                    return;
-                }
-
-                let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
-                if !view_mask.intersects(&entity_mask) {
-                    return;
-                }
-
-                // If we have an aabb and transform, do frustum culling
-                if maybe_no_frustum_culling.is_none() {
-                    let model = transform.compute_matrix();
-                    let model_sphere = Sphere {
-                        center: model.transform_point3a(model_aabb.center),
-                        radius: transform.radius_vec3a(model_aabb.half_extents),
-                    };
-                    // Do quick sphere-based frustum culling
-                    if !frustum.intersects_sphere(&model_sphere, false) {
-                        return;
-                    }
-                    // If we have an aabb, do aabb-based frustum culling
-                    if !frustum.intersects_obb(model_aabb, &model, false) {
-                        return;
-                    }
-                }
-
-                computed_visibility.set_visible_in_view();
-                let cell = thread_queues.get_or_default();
-                let mut queue = cell.take();
-                queue.push(entity);
-                cell.set(queue);
-            },
-        );
-
-        visible_no_aabb_query.par_for_each_mut(
-            VISIBLE_ENTITIES_QUERY_BATCH_SIZE,
-            |(entity, mut computed_visibility, maybe_entity_mask)| {
-                // skip computing visibility for entities that are configured to be hidden. is_visible_in_view has already been set to false
-                // in visibility_propagate_system
-                if !computed_visibility.is_visible_in_hierarchy() {
-                    return;
-                }
-
-                let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
-                if !view_mask.intersects(&entity_mask) {
-                    return;
-                }
-
-                computed_visibility.set_visible_in_view();
-                let cell = thread_queues.get_or_default();
-                let mut queue = cell.take();
-                queue.push(entity);
-                cell.set(queue);
-            },
-        );
-
-        for cell in thread_queues.iter_mut() {
+        for cell in aabb_thread_queues.iter_mut() {
+            visible_entities.entities.append(cell.get_mut());
+        }
+        for cell in no_aabb_thread_queues.iter_mut() {
             visible_entities.entities.append(cell.get_mut());
         }
     }
