@@ -324,7 +324,7 @@ impl TaskPool {
                     }
                 };
     
-                execute_forever.or(get_results_task).await
+                get_results_task.or(execute_forever).await
             })
         }
     }
