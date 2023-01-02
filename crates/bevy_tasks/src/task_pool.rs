@@ -310,6 +310,11 @@ impl TaskPool {
                     results
                 };
 
+                // we spawn the get_results task on the scope executor, so that if the main thread
+                // at least has some work to do and is kept hotter. It will still sleep some, but not
+                // as much as when we just poll get_results directly. This has some negative effects too
+                // because we need get_results to finish during tick_forever and then have get_results_task
+                // polled later.
                 let get_results_task = task_scope_executor.spawn(get_results);
     
                 let execute_forever = async move {
