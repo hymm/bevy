@@ -3,11 +3,12 @@ use std::{
     marker::PhantomData,
     mem,
     sync::Arc,
-    thread::{self, JoinHandle},
+    thread::{self, yield_now, JoinHandle},
 };
 
 use async_task::FallibleTask;
 use concurrent_queue::ConcurrentQueue;
+use crossbeam_utils::Backoff;
 use futures_lite::{future, pin, FutureExt};
 
 use crate::Task;
@@ -309,19 +310,32 @@ impl TaskPool {
                 results
             };
 
-            // Pin the futures on the stack.
             pin!(get_results);
 
+            let backoff = Backoff::new();
+            let mut check_count = 0;
             loop {
                 if let Some(result) = future::block_on(future::poll_once(&mut get_results)) {
                     break result;
                 };
 
-                std::panic::catch_unwind(|| {
-                    executor.try_tick();
-                    task_scope_executor.try_tick();
+                let found_task = std::panic::catch_unwind(|| {
+                    let found_task = executor.try_tick();
+                    let found_local_task = task_scope_executor.try_tick();
+
+                    found_task || found_local_task
                 })
-                .ok();
+                .unwrap_or(false);
+
+                if !found_task && check_count < 20 {
+                    check_count += 1;
+                    backoff.spin();
+                    continue;
+                }
+
+                check_count = 0;
+                backoff.reset();
+                yield_now();
             }
         }
     }
