@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+mod thread_local_vec;
+
 mod slice;
 pub use slice::{ParallelSlice, ParallelSliceMut};
 

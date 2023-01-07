@@ -7,10 +7,11 @@ use std::{
 };
 
 use async_task::FallibleTask;
+use awaitgroup::WaitGroup;
 use concurrent_queue::ConcurrentQueue;
 use futures_lite::{future, pin, FutureExt};
 
-use crate::Task;
+use crate::{thread_local_vec::ThreadLocalVec, Task};
 
 struct CallOnDrop(Option<Arc<dyn Fn() + Send + Sync + 'static>>);
 
@@ -281,14 +282,18 @@ impl TaskPool {
         let task_scope_executor = &async_executor::Executor::default();
         let task_scope_executor: &'env async_executor::Executor =
             unsafe { mem::transmute(task_scope_executor) };
-        let spawned: ConcurrentQueue<FallibleTask<T>> = ConcurrentQueue::unbounded();
-        let spawned_ref: &'env ConcurrentQueue<FallibleTask<T>> =
+        let spawned: ThreadLocalVec<FallibleTask<T>> = ThreadLocalVec::new();
+        let spawned_ref: &'env ThreadLocalVec<FallibleTask<T>> =
             unsafe { mem::transmute(&spawned) };
+
+        let mut wg = WaitGroup::new();
+        let wg_ref: &'env WaitGroup = unsafe { mem::transmute(&wg) };
 
         let scope = Scope {
             executor,
             task_scope_executor,
             spawned: spawned_ref,
+            wg: wg_ref,
             scope: PhantomData,
             env: PhantomData,
         };
@@ -297,33 +302,23 @@ impl TaskPool {
 
         f(scope_ref);
 
-        if spawned.is_empty() {
-            Vec::new()
-        } else {
-            let get_results = async {
-                let mut results = Vec::with_capacity(spawned_ref.len());
-                while let Ok(task) = spawned_ref.pop() {
-                    results.push(task.await.unwrap());
-                }
+        // Pin the futures on the stack.
+        let wait = wg.wait();
+        pin!(wait);
 
-                results
+        loop {
+            if future::block_on(future::poll_once(&mut wait)).is_some() {
+                break;
             };
 
-            // Pin the futures on the stack.
-            pin!(get_results);
-
-            loop {
-                if let Some(result) = future::block_on(future::poll_once(&mut get_results)) {
-                    break result;
-                };
-
-                std::panic::catch_unwind(|| {
-                    executor.try_tick();
-                    task_scope_executor.try_tick();
-                })
-                .ok();
-            }
+            std::panic::catch_unwind(|| {
+                executor.try_tick();
+                task_scope_executor.try_tick();
+            })
+            .ok();
         }
+
+        spawned.into_iter()
     }
 
     /// Spawns a static future onto the thread pool. The returned Task is a future. It can also be
@@ -392,11 +387,12 @@ impl Drop for TaskPool {
 /// A `TaskPool` scope for running one or more non-`'static` futures.
 ///
 /// For more information, see [`TaskPool::scope`].
-#[derive(Debug)]
-pub struct Scope<'scope, 'env: 'scope, T> {
+// #[derive(Debug)]
+pub struct Scope<'scope, 'env: 'scope, T: Send> {
     executor: &'scope async_executor::Executor<'scope>,
     task_scope_executor: &'scope async_executor::Executor<'scope>,
-    spawned: &'scope ConcurrentQueue<FallibleTask<T>>,
+    spawned: &'scope ThreadLocalVec<FallibleTask<T>>,
+    wg: WaitGroup,
     // make `Scope` invariant over 'scope and 'env
     scope: PhantomData<&'scope mut &'scope ()>,
     env: PhantomData<&'env mut &'env ()>,
@@ -412,10 +408,16 @@ impl<'scope, 'env, T: Send + 'scope> Scope<'scope, 'env, T> {
     ///
     /// For more information, see [`TaskPool::scope`].
     pub fn spawn<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
-        let task = self.executor.spawn(f).fallible();
-        // ConcurrentQueue only errors when closed or full, but we never
-        // close and use an unbounded queue, so it is safe to unwrap
-        self.spawned.push(task).unwrap();
+        let worker = self.wg.worker();
+        let task = self
+            .executor
+            .spawn(async move {
+                let result = f.await;
+                worker.done();
+                result
+            })
+            .fallible();
+        self.spawned.push(task);
     }
 
     /// Spawns a scoped future onto the thread the scope is run on. The scope *must* outlive
@@ -425,25 +427,31 @@ impl<'scope, 'env, T: Send + 'scope> Scope<'scope, 'env, T> {
     ///
     /// For more information, see [`TaskPool::scope`].
     pub fn spawn_on_scope<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
-        let task = self.task_scope_executor.spawn(f).fallible();
-        // ConcurrentQueue only errors when closed or full, but we never
-        // close and use an unbounded queue, so it is safe to unwrap
-        self.spawned.push(task).unwrap();
+        let worker = self.wg.worker();
+        let task = self
+            .task_scope_executor
+            .spawn(async move {
+                let result = f.await;
+                worker.done();
+                result
+            })
+            .fallible();
+        self.spawned.push(task);
     }
 }
 
-impl<'scope, 'env, T> Drop for Scope<'scope, 'env, T>
-where
-    T: 'scope,
-{
-    fn drop(&mut self) {
-        future::block_on(async {
-            while let Ok(task) = self.spawned.pop() {
-                task.cancel().await;
-            }
-        });
-    }
-}
+// impl<'scope, 'env, T> Drop for Scope<'scope, 'env, T>
+// where
+//     T: 'scope,
+// {
+//     fn drop(&mut self) {
+//         future::block_on(async {
+//             while let Ok(task) = self.spawned.pop() {
+//                 task.cancel().await;
+//             }
+//         });
+//     }
+// }
 
 #[cfg(test)]
 #[allow(clippy::disallowed_types)]
