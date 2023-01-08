@@ -22,6 +22,6 @@ impl<T: Send> ThreadLocalVec<T> {
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = T> {
-        self.inner.into_iter().map(|cell| cell.take()).flatten()
+        self.inner.into_iter().flat_map(|cell| cell.take())
     }
 }

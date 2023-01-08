@@ -8,7 +8,6 @@ use std::{
 
 use async_task::FallibleTask;
 use awaitgroup::WaitGroup;
-use concurrent_queue::ConcurrentQueue;
 use futures_lite::{future, pin, FutureExt};
 
 use crate::{thread_local_vec::ThreadLocalVec, Task};
@@ -318,7 +317,14 @@ impl TaskPool {
             .ok();
         }
 
-        spawned.into_iter()
+        // TODO: figure out a better way of doing this
+        future::block_on(async {
+            let mut results = Vec::new();
+            for task in spawned.into_iter() {
+                results.push(task.await.unwrap());
+            }
+            results
+        })
     }
 
     /// Spawns a static future onto the thread pool. The returned Task is a future. It can also be
@@ -392,7 +398,7 @@ pub struct Scope<'scope, 'env: 'scope, T: Send> {
     executor: &'scope async_executor::Executor<'scope>,
     task_scope_executor: &'scope async_executor::Executor<'scope>,
     spawned: &'scope ThreadLocalVec<FallibleTask<T>>,
-    wg: WaitGroup,
+    wg: &'scope WaitGroup,
     // make `Scope` invariant over 'scope and 'env
     scope: PhantomData<&'scope mut &'scope ()>,
     env: PhantomData<&'env mut &'env ()>,
