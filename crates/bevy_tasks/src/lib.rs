@@ -7,6 +7,9 @@ pub use slice::{ParallelSlice, ParallelSliceMut};
 mod task;
 pub use task::Task;
 
+mod scope_helpers;
+pub use scope_helpers::*;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod task_pool;
 #[cfg(not(target_arch = "wasm32"))]
