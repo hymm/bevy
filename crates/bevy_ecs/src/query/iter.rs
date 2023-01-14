@@ -6,7 +6,9 @@ use crate::{
     query::{ArchetypeFilter, DebugCheckedUnwrap, QueryState, WorldQuery},
     storage::{TableId, TableRow, Tables},
 };
-use std::{borrow::Borrow, iter::FusedIterator, marker::PhantomData, mem::MaybeUninit};
+use std::{
+    borrow::Borrow, iter::FusedIterator, marker::PhantomData, mem::MaybeUninit, num::NonZeroUsize,
+};
 
 use super::ReadOnlyWorldQuery;
 
@@ -445,8 +447,8 @@ impl<'w, 's, Q: ReadOnlyWorldQuery, F: ReadOnlyWorldQuery, const K: usize> Fused
 }
 
 struct QueryIterationCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
-    table_id_iter: std::slice::Iter<'s, TableId>,
-    archetype_id_iter: std::slice::Iter<'s, ArchetypeId>,
+    table_id_iter: std::iter::Peekable<std::slice::Iter<'s, TableId>>,
+    archetype_id_iter: std::iter::Peekable<std::slice::Iter<'s, ArchetypeId>>,
     table_entities: &'w [Entity],
     archetype_entities: &'w [ArchetypeEntity],
     fetch: Q::Fetch<'w>,
@@ -455,6 +457,8 @@ struct QueryIterationCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     current_len: usize,
     // either table row or archetype index, depending on whether both `Q`'s and `F`'s fetches are dense
     current_row: usize,
+    // stop at this row, if non will stop at last row
+    last_row: usize,
     phantom: PhantomData<Q>,
 }
 
@@ -476,6 +480,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
             filter: F::clone_fetch(&self.filter),
             current_len: self.current_len,
             current_row: self.current_row,
+            last_row: usize::MAX,
             phantom: PhantomData,
         }
     }
@@ -510,10 +515,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
             filter,
             table_entities: &[],
             archetype_entities: &[],
-            table_id_iter: query_state.matched_table_ids.iter(),
-            archetype_id_iter: query_state.matched_archetype_ids.iter(),
+            table_id_iter: query_state.matched_table_ids.iter().peekable(),
+            archetype_id_iter: query_state.matched_archetype_ids.iter().peekable(),
             current_len: 0,
             current_row: 0,
+            last_row: usize::MAX,
             phantom: PhantomData,
         }
     }
@@ -592,6 +598,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
                     continue;
                 }
 
+                // end iteration if we've hit the last row
+                if self.table_id_iter.peek().is_none() && self.last_row == self.current_row {
+                    return None;
+                }
+
                 // SAFETY: set_table was called prior.
                 // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
                 let item = Q::fetch(&mut self.fetch, *entity, row);
@@ -632,6 +643,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
                     continue;
                 }
 
+                // end iteration if we've hit the last row
+                if self.archetype_id_iter.peek().is_none() && self.last_row == self.current_row {
+                    return None;
+                }
+
                 // SAFETY: set_archetype was called prior, `current_row` is an archetype index in range of the current archetype
                 // `current_row` is an archetype index row in range of the current archetype, because if it was not, then the if above would have been executed.
                 let item = Q::fetch(
@@ -642,6 +658,185 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
                 self.current_row += 1;
                 return Some(item);
             }
+        }
+    }
+}
+
+pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
+    world: &'w World,
+    tables: &'w Tables,
+    archetypes: &'w Archetypes,
+    query_state: &'s QueryState<Q, F>,
+    last_change_tick: u32,
+    change_tick: u32,
+    table_ids: &'s [TableId],
+    archetype_ids: &'s [ArchetypeId],
+    start_row: usize,
+    last_row: usize,
+}
+
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
+    const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
+
+    pub fn new(
+        world: &'w World,
+        query_state: &'s QueryState<Q, F>,
+        last_change_tick: u32,
+        change_tick: u32,
+    ) -> Self {
+        Self {
+            world,
+            query_state,
+            tables: &world.storages().tables,
+            archetypes: &world.archetypes,
+            last_change_tick,
+            change_tick,
+            table_ids: &query_state.matched_table_ids,
+            archetype_ids: &query_state.matched_archetype_ids,
+            start_row: 0,
+            last_row: usize::MAX,
+        }
+    }
+
+    // TODO: this is a straight copy of the safety comment from queryiter. I think the invariants should be the same
+    // but there might be some extra
+    /// # Safety
+    /// This does not check for mutable query correctness. To be safe, make sure mutable queries
+    /// have unique access to the components they query.
+    /// This does not validate that `world.id()` matches `query_state.world_id`. Calling this on a `world`
+    /// with a mismatched [`WorldId`](crate::world::WorldId) is unsound.
+    pub unsafe fn into_iter(self) -> QueryIter<'w, 's, Q, F> {
+        let fetch = Q::init_fetch(
+            self.world,
+            &self.query_state.fetch_state,
+            self.last_change_tick,
+            self.change_tick,
+        );
+        let filter = F::init_fetch(
+            self.world,
+            &self.query_state.filter_state,
+            self.last_change_tick,
+            self.change_tick,
+        );
+
+        let cursor = QueryIterationCursor {
+            table_id_iter: self.table_ids.iter().peekable(),
+            archetype_id_iter: self.archetype_ids.iter().peekable(),
+            table_entities: &[],
+            archetype_entities: &[],
+            fetch,
+            filter,
+            current_len: 0,
+            current_row: self.start_row,
+            last_row: self.last_row,
+            phantom: PhantomData::default(),
+        };
+
+        QueryIter {
+            query_state: self.query_state,
+            tables: self.tables,
+            archetypes: self.archetypes,
+            cursor,
+        }
+    }
+
+    pub fn split_at(self, position: usize) -> (Self, Self) {
+        if Self::IS_DENSE {
+            let (left_table_ids, right_table_ids, left_last_row, right_start_row) =
+                self.split_table_ids(position);
+
+            (
+                Self {
+                    world: self.world,
+                    query_state: self.query_state,
+                    tables: self.tables,
+                    last_change_tick: self.last_change_tick,
+                    change_tick: self.change_tick,
+                    archetypes: self.archetypes,
+                    table_ids: left_table_ids,
+                    archetype_ids: &[],
+                    start_row: self.start_row,
+                    last_row: left_last_row,
+                },
+                Self {
+                    world: self.world,
+                    query_state: self.query_state,
+                    tables: self.tables,
+                    last_change_tick: self.last_change_tick,
+                    change_tick: self.change_tick,
+                    archetypes: self.archetypes,
+                    table_ids: right_table_ids,
+                    archetype_ids: &[],
+                    start_row: right_start_row,
+                    last_row: self.last_row,
+                },
+            )
+        } else {
+            let archetype_id_split_pos = 0;
+            let (left_archetype_ids, right_archetype_ids) =
+                self.archetype_ids.split_at(archetype_id_split_pos);
+
+            (
+                Self {
+                    world: self.world,
+                    query_state: self.query_state,
+                    tables: self.tables,
+                    last_change_tick: self.last_change_tick,
+                    change_tick: self.change_tick,
+                    archetypes: self.archetypes,
+                    table_ids: &[],
+                    archetype_ids: left_archetype_ids,
+                    start_row: self.start_row,
+                    last_row: 0,
+                },
+                Self {
+                    world: self.world,
+                    query_state: self.query_state,
+                    tables: self.tables,
+                    last_change_tick: self.last_change_tick,
+                    change_tick: self.change_tick,
+                    archetypes: self.archetypes,
+                    table_ids: &[],
+                    archetype_ids: right_archetype_ids,
+                    start_row: 0,
+                    last_row: self.last_row,
+                },
+            )
+        }
+    }
+
+    #[inline]
+    fn split_table_ids(&self, position: usize) -> (&'s [TableId], &'s [TableId], usize, usize) {
+        let mut sum = 0;
+        let table_index = self.table_ids.iter().position(|id| {
+            sum += self.tables[*id].entity_count();
+            sum >= position
+        });
+        if let Some(table_index) = table_index {
+            // the boundary is at the end of a table
+            if sum == position {
+                (
+                    &self.table_ids[..table_index + 1],
+                    &self.table_ids[table_index + 1..],
+                    &self.tables[self.table_ids[table_index]].entity_count() - 1,
+                    0,
+                )
+            } else {
+                let break_row = 1;
+                (
+                    &self.table_ids[..table_index + 1],
+                    &self.table_ids[table_index..],
+                    break_row,
+                    break_row + 1,
+                )
+            }
+        } else {
+            (
+                self.table_ids,
+                &[],
+                0,
+                usize::MAX, // this might be wrong
+            )
         }
     }
 }
