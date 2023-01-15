@@ -843,8 +843,6 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
 
 pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     world: &'w World,
-    tables: &'w Tables,
-    archetypes: &'w Archetypes,
     query_state: &'s QueryState<Q, F>,
     last_change_tick: u32,
     change_tick: u32,
@@ -866,8 +864,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         Self {
             world,
             query_state,
-            tables: &world.storages().tables,
-            archetypes: &world.archetypes,
             last_change_tick,
             change_tick,
             table_ids: &query_state.matched_table_ids,
@@ -877,7 +873,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         }
     }
 
-    // TODO: this is a straight copy of the safety comment from queryiter. I think the invariants should be the same
+    // TODO: this is a straight copy of the safety comment from QueryIter. I think the invariants should be the same
     // but there might be some extra
     /// # Safety
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
@@ -914,7 +910,12 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         // initialize some state on the cursor
         if Self::IS_DENSE {
             if let Some(table_id) = cursor.table_id_iter.next() {
-                let table = self.tables.get(*table_id).debug_checked_unwrap();
+                let table = self
+                    .world
+                    .storages
+                    .tables
+                    .get(*table_id)
+                    .debug_checked_unwrap();
                 // SAFETY: `table` is from the world that `fetch/filter` were created for,
                 // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
                 Q::set_table(&mut cursor.fetch, &self.query_state.fetch_state, table);
@@ -928,8 +929,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
 
         QueryIter {
             query_state: self.query_state,
-            tables: self.tables,
-            archetypes: self.archetypes,
+            tables: &self.world.storages.tables,
+            archetypes: &self.world.archetypes,
             cursor,
         }
     }
@@ -942,10 +943,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 Self {
                     world: self.world,
                     query_state: self.query_state,
-                    tables: self.tables,
                     last_change_tick: self.last_change_tick,
                     change_tick: self.change_tick,
-                    archetypes: self.archetypes,
                     table_ids: left_table_ids,
                     archetype_ids: &[],
                     start_row: self.start_row,
@@ -954,10 +953,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 Self {
                     world: self.world,
                     query_state: self.query_state,
-                    tables: self.tables,
                     last_change_tick: self.last_change_tick,
                     change_tick: self.change_tick,
-                    archetypes: self.archetypes,
                     table_ids: right_table_ids,
                     archetype_ids: &[],
                     start_row: right_start_row,
@@ -972,22 +969,18 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 Self {
                     world: self.world,
                     query_state: self.query_state,
-                    tables: self.tables,
                     last_change_tick: self.last_change_tick,
                     change_tick: self.change_tick,
-                    archetypes: self.archetypes,
                     table_ids: &[],
                     archetype_ids: left_archetype_ids,
                     start_row: self.start_row,
                     last_row: left_last_row,
-                }, 
+                },
                 Self {
                     world: self.world,
                     query_state: self.query_state,
-                    tables: self.tables,
                     last_change_tick: self.last_change_tick,
                     change_tick: self.change_tick,
-                    archetypes: self.archetypes,
                     table_ids: &[],
                     archetype_ids: right_archetype_ids,
                     start_row: right_start_row,
@@ -1001,7 +994,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     fn split_table_ids(&self, position: usize) -> (&'s [TableId], &'s [TableId], usize, usize) {
         let mut sum = 0;
         let table_index = self.table_ids.iter().position(|id| {
-            sum += self.tables[*id].entity_count();
+            sum += self.world.storages.tables[*id].entity_count();
             sum >= position
         });
         if let Some(table_index) = table_index {
@@ -1014,7 +1007,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     0,
                 )
             } else {
-                let table_len = self.tables[self.table_ids[table_index]].entity_count();
+                let table_len =
+                    self.world.storages.tables[self.table_ids[table_index]].entity_count();
                 let break_row = table_len - (sum - position);
                 (
                     &self.table_ids[..table_index + 1],
@@ -1035,7 +1029,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     ) -> (&'s [ArchetypeId], &'s [ArchetypeId], usize, usize) {
         let mut sum = 0;
         let archetype_index = self.archetype_ids.iter().position(|id| {
-            sum += self.archetypes[*id].len();
+            sum += self.world.archetypes[*id].len();
             sum >= position
         });
         if let Some(archetype_index) = archetype_index {
@@ -1048,7 +1042,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     0,
                 )
             } else {
-                let table_len = self.archetypes[self.archetype_ids[archetype_index]].len();
+                let table_len = self.world.archetypes[self.archetype_ids[archetype_index]].len();
                 let break_row = table_len - (sum - position);
                 (
                     &self.archetype_ids[..archetype_index + 1],
@@ -1060,6 +1054,47 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         } else {
             (self.archetype_ids, &[], usize::MAX, 0)
         }
+    }
+}
+
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
+    for QueryProducer<'w, 's, Q, F>
+{
+    type Item = Q::Item<'w>;
+    type IntoIter = QueryIter<'w, 's, Q, F>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // Safety: this is probably safe...
+        unsafe { self.into_iter() }
+    }
+
+    fn len(&self) -> usize {
+        let (remaining_matched, last_remaining): (usize, _) = if Self::IS_DENSE {
+            let ids = self.table_ids.iter();
+            let remaining_matched = ids
+                .map(|id| self.world.storages.tables[*id].entity_count())
+                .sum();
+            let last_remaining = if let Some(last_table_id) = self.table_ids.last() {
+                self.world.storages.tables[*last_table_id].entity_count().saturating_sub(self.last_row)
+            } else {
+                0
+            };
+            (remaining_matched, last_remaining)
+        } else {
+            let ids = self.archetype_ids.iter();
+            let remaining_matched = ids.map(|id| self.world.archetypes[*id].len()).sum();
+            let last_remaining = if let Some(last_archetype_id) = self.archetype_ids.last() {
+                self.world.archetypes[*last_archetype_id].len().saturating_sub(self.last_row)
+            } else {
+                0
+            };
+            (remaining_matched, last_remaining)
+        };
+        remaining_matched - self.start_row - last_remaining
+    }
+
+    fn split_at(self, position: usize) -> (Self, Self) {
+        self.split_at(position)
     }
 }
 
@@ -1180,19 +1215,24 @@ mod tests {
             world.spawn((C, E));
 
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
-            
+
             // split on a table boundary
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
             let (left_producer, right_producer) = producer.split_at(3);
             assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
-            assert_eq!(get_entities(right_producer), vec!["1v0", "3v0", "5v0", "7v0"]);
+            assert_eq!(
+                get_entities(right_producer),
+                vec!["1v0", "3v0", "5v0", "7v0"]
+            );
 
             // split in the middle of the second table
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
             let (left_producer, right_producer) = producer.split_at(4);
-            assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0", "1v0"]);
+            assert_eq!(
+                get_entities(left_producer),
+                vec!["0v0", "2v0", "4v0", "1v0"]
+            );
             assert_eq!(get_entities(right_producer), vec!["3v0", "5v0", "7v0"]);
-
         }
     }
 }

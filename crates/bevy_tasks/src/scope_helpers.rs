@@ -22,20 +22,21 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
 ) where
     'env: 'scope,
     P: Producer<Item = T> + 'scope,
-    F: FnOnce(T) + Send + Sync + Copy + 'scope,
+    F: FnOnce(T) + Send + Sync + Clone + 'scope,
 {
     let length = producer.len();
     if length > batch_size {
         let mid = length / 2;
         let (left_producer, right_producer) = producer.split_at(mid);
+        let op_a = op.clone();
         join_tasks(
             scope,
-            move || execute_operation(scope, op, left_producer, batch_size),
+            move || execute_operation(scope, op_a, left_producer, batch_size),
             move || execute_operation(scope, op, right_producer, batch_size),
         );
     } else {
         for item in producer.into_iter() {
-            op(item);
+            op.clone()(item);
         }
     }
 }
@@ -46,7 +47,7 @@ pub trait Producer: Send + Sized {
     type Item;
 
     /// The type of iterator we will become.
-    type IntoIter: Iterator<Item = Self::Item> + DoubleEndedIterator + ExactSizeIterator;
+    type IntoIter: Iterator<Item = Self::Item>;
 
     /// Convert `self` into an iterator; at this point, no more parallel splits
     /// are possible.

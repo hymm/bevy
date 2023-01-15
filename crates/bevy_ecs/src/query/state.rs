@@ -1114,60 +1114,9 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ) {
         // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter, QueryState::for_each_unchecked_manual, QueryState::par_for_each_unchecked_manual
-        bevy_tasks::ComputeTaskPool::get().scope(|scope| {
-            if D::IS_DENSE && F::IS_DENSE {
-                // SAFETY: We only access table data that has been registered in `self.archetype_component_access`.
-                let tables = &world.storages().tables;
-                for table_id in &self.matched_table_ids {
-                    let table = &tables[*table_id];
-                    if table.is_empty() {
-                        continue;
-                    }
-
-                    let mut offset = 0;
-                    while offset < table.entity_count() {
-                        let mut func = func.clone();
-                        let len = batch_size.min(table.entity_count() - offset);
-                        scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
-                            let table = &world
-                                .storages()
-                                .tables
-                                .get(*table_id)
-                                .debug_checked_unwrap();
-                            let batch = offset..offset + len;
-                            self.iter_unchecked_manual(world, last_run, this_run)
-                                .for_each_in_table_range(&mut func, table, batch);
-                        });
-                        offset += batch_size;
-                    }
-                }
-            } else {
-                let archetypes = world.archetypes();
-                for archetype_id in &self.matched_archetype_ids {
-                    let mut offset = 0;
-                    let archetype = &archetypes[*archetype_id];
-                    if archetype.is_empty() {
-                        continue;
-                    }
-
-                    while offset < archetype.len() {
-                        let mut func = func.clone();
-                        let len = batch_size.min(archetype.len() - offset);
-                        scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
-                            let archetype =
-                                world.archetypes().get(*archetype_id).debug_checked_unwrap();
-                            let batch = offset..offset + len;
-                            self.iter_unchecked_manual(world, last_run, this_run)
-                                .for_each_in_archetype_range(&mut func, archetype, batch);
-                        });
-                        offset += batch_size;
-                    }
-                }
-            }
+        ComputeTaskPool::get().scope(|scope| {
+            let producer = QueryProducer::new(world, &self, last_change_tick, change_tick);
+            bevy_tasks::execute_operation(scope, func, producer, batch_size);
         });
     }
 
