@@ -16,7 +16,7 @@ use bevy_utils::tracing::Instrument;
 use fixedbitset::FixedBitSet;
 use std::{borrow::Borrow, fmt, mem::MaybeUninit};
 
-use super::{NopWorldQuery, QueryManyIter, ROQueryItem, ReadOnlyWorldQuery};
+use super::{NopWorldQuery, QueryManyIter, QueryProducer, ROQueryItem, ReadOnlyWorldQuery};
 
 /// Provides scoped access to a [`World`] state according to a given [`WorldQuery`] and query filter.
 #[repr(C)]
@@ -937,107 +937,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
         // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter, QueryState::for_each_unchecked_manual, QueryState::par_for_each_unchecked_manual
         ComputeTaskPool::get().scope(|scope| {
-            if Q::IS_DENSE && F::IS_DENSE {
-                let tables = &world.storages().tables;
-                for table_id in &self.matched_table_ids {
-                    let table = &tables[*table_id];
-                    if table.is_empty() {
-                        continue;
-                    }
-
-                    let mut offset = 0;
-                    while offset < table.entity_count() {
-                        let func = func.clone();
-                        let len = batch_size.min(table.entity_count() - offset);
-                        let task = async move {
-                            let mut fetch =
-                                Q::init_fetch(world, &self.fetch_state, last_run, this_run);
-                            let mut filter =
-                                F::init_fetch(world, &self.filter_state, last_run, this_run);
-                            let tables = &world.storages().tables;
-                            let table = tables.get(*table_id).debug_checked_unwrap();
-                            let entities = table.entities();
-                            Q::set_table(&mut fetch, &self.fetch_state, table);
-                            F::set_table(&mut filter, &self.filter_state, table);
-                            for row in offset..offset + len {
-                                let entity = entities.get_unchecked(row);
-                                let row = TableRow::new(row);
-                                if !F::filter_fetch(&mut filter, *entity, row) {
-                                    continue;
-                                }
-                                func(Q::fetch(&mut fetch, *entity, row));
-                            }
-                        };
-                        #[cfg(feature = "trace")]
-                        let span = bevy_utils::tracing::info_span!(
-                            "par_for_each",
-                            query = std::any::type_name::<Q>(),
-                            filter = std::any::type_name::<F>(),
-                            count = len,
-                        );
-                        #[cfg(feature = "trace")]
-                        let task = task.instrument(span);
-                        scope.spawn(task);
-                        offset += batch_size;
-                    }
-                }
-            } else {
-                let archetypes = &world.archetypes;
-                for archetype_id in &self.matched_archetype_ids {
-                    let mut offset = 0;
-                    let archetype = &archetypes[*archetype_id];
-                    if archetype.is_empty() {
-                        continue;
-                    }
-
-                    while offset < archetype.len() {
-                        let func = func.clone();
-                        let len = batch_size.min(archetype.len() - offset);
-                        let task = async move {
-                            let mut fetch =
-                                Q::init_fetch(world, &self.fetch_state, last_run, this_run);
-                            let mut filter =
-                                F::init_fetch(world, &self.filter_state, last_run, this_run);
-                            let tables = &world.storages().tables;
-                            let archetype =
-                                world.archetypes.get(*archetype_id).debug_checked_unwrap();
-                            let table = tables.get(archetype.table_id()).debug_checked_unwrap();
-                            Q::set_archetype(&mut fetch, &self.fetch_state, archetype, table);
-                            F::set_archetype(&mut filter, &self.filter_state, archetype, table);
-
-                            let entities = archetype.entities();
-                            for archetype_row in offset..offset + len {
-                                let archetype_entity = entities.get_unchecked(archetype_row);
-                                if !F::filter_fetch(
-                                    &mut filter,
-                                    archetype_entity.entity(),
-                                    archetype_entity.table_row(),
-                                ) {
-                                    continue;
-                                }
-                                func(Q::fetch(
-                                    &mut fetch,
-                                    archetype_entity.entity(),
-                                    archetype_entity.table_row(),
-                                ));
-                            }
-                        };
-
-                        #[cfg(feature = "trace")]
-                        let span = bevy_utils::tracing::info_span!(
-                            "par_for_each",
-                            query = std::any::type_name::<Q>(),
-                            filter = std::any::type_name::<F>(),
-                            count = len,
-                        );
-                        #[cfg(feature = "trace")]
-                        let task = task.instrument(span);
-
-                        scope.spawn(task);
-                        offset += batch_size;
-                    }
-                }
-            }
+            let producer = QueryProducer::new(world, &self, last_change_tick, change_tick);
+            bevy_tasks::execute_operation(scope, func, producer, batch_size);
         });
     }
 
