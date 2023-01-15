@@ -10,7 +10,7 @@ use crate::{
     storage::{TableId, TableRow},
     world::{World, WorldId},
 };
-use bevy_tasks::ComputeTaskPool;
+use bevy_tasks::{ComputeTaskPool, Producer};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Instrument;
 use fixedbitset::FixedBitSet;
@@ -940,7 +940,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter, QueryState::for_each_unchecked_manual, QueryState::par_for_each_unchecked_manual
         ComputeTaskPool::get().scope(|scope| {
             let producer = QueryProducer::new(world, &self, last_change_tick, change_tick);
-            bevy_tasks::execute_operation(scope, func, producer, batch_size);
+            let length = producer.len();
+            bevy_tasks::execute_operation(scope, func, producer, length, batch_size);
         });
     }
 
