@@ -18,21 +18,21 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
     scope: &'scope Scope<'scope, 'env, ()>,
     op: F,
     producer: P,
+    length: usize,
     batch_size: usize,
 ) where
     'env: 'scope,
     P: Producer<Item = T> + 'scope,
     F: FnOnce(T) + Send + Sync + Clone + 'scope,
 {
-    let length = producer.len();
     if length > batch_size {
         let mid = length / 2;
         let (left_producer, right_producer) = producer.split_at(mid);
         let op_a = op.clone();
         join_tasks(
             scope,
-            move || execute_operation(scope, op_a, left_producer, batch_size),
-            move || execute_operation(scope, op, right_producer, batch_size),
+            move || execute_operation(scope, op_a, left_producer, mid, batch_size),
+            move || execute_operation(scope, op, right_producer, length - mid, batch_size),
         );
     } else {
         for item in producer.into_iter() {
