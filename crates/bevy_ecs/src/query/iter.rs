@@ -965,9 +965,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 },
             )
         } else {
-            let archetype_id_split_pos = 0;
-            let (left_archetype_ids, right_archetype_ids) =
-                self.archetype_ids.split_at(archetype_id_split_pos);
+            let (left_archetype_ids, right_archetype_ids, left_last_row, right_start_row) =
+                self.split_archetype_ids(position);
 
             (
                 Self {
@@ -980,8 +979,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     table_ids: &[],
                     archetype_ids: left_archetype_ids,
                     start_row: self.start_row,
-                    last_row: 0,
-                },
+                    last_row: left_last_row,
+                }, 
                 Self {
                     world: self.world,
                     query_state: self.query_state,
@@ -991,7 +990,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     archetypes: self.archetypes,
                     table_ids: &[],
                     archetype_ids: right_archetype_ids,
-                    start_row: 0,
+                    start_row: right_start_row,
                     last_row: self.last_row,
                 },
             )
@@ -1006,7 +1005,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             sum >= position
         });
         if let Some(table_index) = table_index {
-            dbg!("table boundary");
             // the boundary is at the end of a table
             if sum == position {
                 (
@@ -1016,10 +1014,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     0,
                 )
             } else {
-                dbg!("break table");
                 let table_len = self.tables[self.table_ids[table_index]].entity_count();
                 let break_row = table_len - (sum - position);
-                dbg!(break_row);
                 (
                     &self.table_ids[..table_index + 1],
                     &self.table_ids[table_index..],
@@ -1029,6 +1025,40 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             }
         } else {
             (self.table_ids, &[], usize::MAX, 0)
+        }
+    }
+
+    #[inline]
+    fn split_archetype_ids(
+        &self,
+        position: usize,
+    ) -> (&'s [ArchetypeId], &'s [ArchetypeId], usize, usize) {
+        let mut sum = 0;
+        let archetype_index = self.archetype_ids.iter().position(|id| {
+            sum += self.archetypes[*id].len();
+            sum >= position
+        });
+        if let Some(archetype_index) = archetype_index {
+            // the boundary is at the end of a table
+            if sum == position {
+                (
+                    &self.archetype_ids[..archetype_index + 1],
+                    &self.archetype_ids[archetype_index + 1..],
+                    usize::MAX, // go to the end of the table
+                    0,
+                )
+            } else {
+                let table_len = self.archetypes[self.archetype_ids[archetype_index]].len();
+                let break_row = table_len - (sum - position);
+                (
+                    &self.archetype_ids[..archetype_index + 1],
+                    &self.archetype_ids[archetype_index..],
+                    break_row,
+                    break_row,
+                )
+            }
+        } else {
+            (self.archetype_ids, &[], usize::MAX, 0)
         }
     }
 }
@@ -1132,6 +1162,37 @@ mod tests {
             assert_eq!(get_entities(right_producer), vec!["2v0"]);
         }
 
-        fn split_multiple_tables() {}
+        #[test]
+        fn split_multiple_tables() {
+            #[derive(Component)]
+            struct D;
+
+            #[derive(Component)]
+            struct E;
+
+            let mut world = World::new();
+
+            for _ in 0..3 {
+                world.spawn(C);
+                world.spawn((C, D));
+            }
+            world.spawn(D);
+            world.spawn((C, E));
+
+            let query_state = QueryState::<Entity, With<C>>::new(&mut world);
+            
+            // split on a table boundary
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(3);
+            assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
+            assert_eq!(get_entities(right_producer), vec!["1v0", "3v0", "5v0", "7v0"]);
+
+            // split in the middle of the second table
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(4);
+            assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0", "1v0"]);
+            assert_eq!(get_entities(right_producer), vec!["3v0", "5v0", "7v0"]);
+
+        }
     }
 }
