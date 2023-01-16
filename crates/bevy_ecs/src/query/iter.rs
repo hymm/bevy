@@ -925,7 +925,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 cursor.current_row = self.start_row;
             }
         } else if let Some(archetype_id) = cursor.archetype_id_iter.next() {
-            let archetype = self.world.archetypes.get(*archetype_id).debug_checked_unwrap();
+            let archetype = self
+                .world
+                .archetypes
+                .get(*archetype_id)
+                .debug_checked_unwrap();
             // SAFETY: `archetype` and `tables` are from the world that `fetch/filter` were created for,
             // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
             let table = self
@@ -1346,6 +1350,24 @@ mod tests {
                 vec!["0v0", "2v0", "4v0", "1v0"]
             );
             assert_eq!(get_entities(right_producer), vec!["3v0", "5v0", "7v0"]);
+        }
+
+        #[test]
+        fn split_multiple_times() {
+            let mut world = World::new();
+            world.spawn_batch((0..4).map(|_| (C)));
+            let query_state = QueryState::<Entity, With<C>>::new(&mut world);
+
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(2);
+
+            assert_eq!(get_entities(left_producer), vec!["0v0", "1v0"]);
+
+            let (left_producer, right_producer) = right_producer.split_at(1);
+            assert_eq!(
+                (get_entities(left_producer), get_entities(right_producer)),
+                (vec!["2v0".into()], vec!["3v0".into()])
+            );
         }
     }
 }
