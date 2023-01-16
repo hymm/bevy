@@ -23,7 +23,7 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
 ) where
     'env: 'scope,
     P: Producer<Item = T> + 'scope,
-    F: FnOnce(T) + Send + Sync + Clone + 'scope,
+    F: Fn(T) + Send + Sync + Clone + 'scope,
 {
     #[cfg(feature = "trace")]
     let _span = tracing::info_span!("execute_operation").entered();
@@ -42,7 +42,7 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
         let _span = tracing::info_span!("run op").entered();
 
         for item in producer.into_iter() {
-            op.clone()(item);
+            op(item);
         }
     }
 }
