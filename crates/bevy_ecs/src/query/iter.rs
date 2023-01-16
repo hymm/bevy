@@ -1021,8 +1021,17 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     #[inline]
     fn split_table_ids(&self, position: usize) -> (&'s [TableId], &'s [TableId], usize, usize) {
         let mut sum = 0;
-        let table_index = self.table_ids.iter().position(|id| {
-            sum += self.world.storages.tables[*id].entity_count();
+        let length = self.table_ids.len();
+        let table_index = self.table_ids.iter().enumerate().position(|(index, id)| {
+            if index == 0 {
+                sum += self.world.storages.tables[*id].entity_count() - self.start_row;
+            } else if index == length - 1 {
+                sum += self
+                    .last_row
+                    .min(self.world.storages.tables[*id].entity_count());
+            } else {
+                sum += self.world.storages.tables[*id].entity_count();
+            }
             sum >= position
         });
         if let Some(table_index) = table_index {
@@ -1056,10 +1065,21 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         position: usize,
     ) -> (&'s [ArchetypeId], &'s [ArchetypeId], usize, usize) {
         let mut sum = 0;
-        let archetype_index = self.archetype_ids.iter().position(|id| {
-            sum += self.world.archetypes[*id].len();
-            sum >= position
-        });
+        let length = self.archetype_ids.len();
+        let archetype_index = self
+            .archetype_ids
+            .iter()
+            .enumerate()
+            .position(|(index, id)| {
+                if index == 0 {
+                    sum += self.world.archetypes[*id].len() - self.start_row;
+                } else if index == length - 1 {
+                    sum += self.last_row.min(self.world.archetypes[*id].len());
+                } else {
+                    sum += self.world.archetypes[*id].len();
+                }
+                sum >= position
+            });
         if let Some(archetype_index) = archetype_index {
             // the boundary is at the end of a table
             if sum == position {
@@ -1353,20 +1373,50 @@ mod tests {
         }
 
         #[test]
-        fn split_multiple_times() {
+        fn split_tables_multiple_times() {
             let mut world = World::new();
-            world.spawn_batch((0..4).map(|_| (C)));
+            world.spawn_batch((0..10).map(|_| (C)));
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
 
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
-            let (left_producer, right_producer) = producer.split_at(2);
+            let (left_producer, right_producer) = producer.split_at(5);
 
-            assert_eq!(get_entities(left_producer), vec!["0v0", "1v0"]);
+            assert_eq!(
+                get_entities(left_producer),
+                vec!["0v0", "1v0", "2v0", "3v0", "4v0"]
+            );
 
-            let (left_producer, right_producer) = right_producer.split_at(1);
+            let (left_producer, right_producer) = right_producer.split_at(2);
             assert_eq!(
                 (get_entities(left_producer), get_entities(right_producer)),
-                (vec!["2v0".into()], vec!["3v0".into()])
+                (
+                    vec!["5v0".into(), "6v0".into()],
+                    vec!["7v0".into(), "8v0".into(), "9v0".into()]
+                )
+            );
+        }
+
+        #[test]
+        fn split_archetypes_multiple_times() {
+            let mut world = World::new();
+            world.spawn_batch((0..10).map(|_| (S)));
+            let query_state = QueryState::<Entity, With<S>>::new(&mut world);
+
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(5);
+
+            assert_eq!(
+                get_entities(left_producer),
+                vec!["0v0", "1v0", "2v0", "3v0", "4v0"]
+            );
+
+            let (left_producer, right_producer) = right_producer.split_at(2);
+            assert_eq!(
+                (get_entities(left_producer), get_entities(right_producer)),
+                (
+                    vec!["5v0".into(), "6v0".into()],
+                    vec!["7v0".into(), "8v0".into(), "9v0".into()]
+                )
             );
         }
     }
