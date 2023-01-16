@@ -924,7 +924,31 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 cursor.current_len = table.entity_count();
                 cursor.current_row = self.start_row;
             }
-        } else {
+        } else if let Some(archetype_id) = cursor.archetype_id_iter.next() {
+            let archetype = self.world.archetypes.get(*archetype_id).debug_checked_unwrap();
+            // SAFETY: `archetype` and `tables` are from the world that `fetch/filter` were created for,
+            // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
+            let table = self
+                .world
+                .storages
+                .tables
+                .get(archetype.table_id())
+                .debug_checked_unwrap();
+            Q::set_archetype(
+                &mut cursor.fetch,
+                &self.query_state.fetch_state,
+                archetype,
+                table,
+            );
+            F::set_archetype(
+                &mut cursor.filter,
+                &self.query_state.filter_state,
+                archetype,
+                table,
+            );
+            cursor.archetype_entities = archetype.entities();
+            cursor.current_len = archetype.len();
+            cursor.current_row = self.start_row;
         }
 
         QueryIter {
@@ -1064,6 +1088,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
     type IntoIter = QueryIter<'w, 's, Q, F>;
 
     fn into_iter(self) -> Self::IntoIter {
+        // todo: write a real safety comment.
         // Safety: this is probably safe...
         unsafe { self.into_iter() }
     }
@@ -1075,7 +1100,9 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
                 .map(|id| self.world.storages.tables[*id].entity_count())
                 .sum();
             let last_remaining = if let Some(last_table_id) = self.table_ids.last() {
-                self.world.storages.tables[*last_table_id].entity_count().saturating_sub(self.last_row)
+                self.world.storages.tables[*last_table_id]
+                    .entity_count()
+                    .saturating_sub(self.last_row)
             } else {
                 0
             };
@@ -1084,7 +1111,9 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
             let ids = self.archetype_ids.iter();
             let remaining_matched = ids.map(|id| self.world.archetypes[*id].len()).sum();
             let last_remaining = if let Some(last_archetype_id) = self.archetype_ids.last() {
-                self.world.archetypes[*last_archetype_id].len().saturating_sub(self.last_row)
+                self.world.archetypes[*last_archetype_id]
+                    .len()
+                    .saturating_sub(self.last_row)
             } else {
                 0
             };
@@ -1109,8 +1138,12 @@ mod tests {
         #[derive(Component)]
         struct C;
 
+        #[derive(Component)]
+        #[component(storage = "SparseSet")]
+        struct S;
+
         // helper function to check entities id's in a producer
-        fn get_entities<'w, 's, F>(producer: QueryProducer<'w, 's, Entity, F>) -> Vec<String>
+        fn get_entities<F>(producer: QueryProducer<Entity, F>) -> Vec<String>
         where
             F: ReadOnlyWorldQuery,
         {
@@ -1215,6 +1248,86 @@ mod tests {
             world.spawn((C, E));
 
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
+
+            // split on a table boundary
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(3);
+            assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
+            assert_eq!(
+                get_entities(right_producer),
+                vec!["1v0", "3v0", "5v0", "7v0"]
+            );
+
+            // split in the middle of the second table
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(4);
+            assert_eq!(
+                get_entities(left_producer),
+                vec!["0v0", "2v0", "4v0", "1v0"]
+            );
+            assert_eq!(get_entities(right_producer), vec!["3v0", "5v0", "7v0"]);
+        }
+
+        #[test]
+        fn split_single_archetype() {
+            let mut world = World::new();
+            let mut query_state = QueryState::<Entity, With<S>>::new(&mut world);
+
+            world.spawn(S);
+            query_state.update_archetypes(&world);
+
+            // splitting at 0 should put all the elements in the right producer
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(0);
+            assert_eq!(get_entities(left_producer), Vec::<&str>::new());
+            assert_eq!(get_entities(right_producer), vec!["0v0"]);
+
+            // should put all elements in  left producer if position is greater than the length
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(2);
+            assert_eq!(get_entities(left_producer), vec!["0v0"]);
+            assert_eq!(get_entities(right_producer), Vec::<&str>::new());
+
+            // spawn 2 more entites for a total of 3
+            for _ in 0..2 {
+                world.spawn(S);
+            }
+
+            dbg!(query_state
+                .iter(&world)
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>());
+
+            // should split at correct position
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(1);
+            assert_eq!(get_entities(left_producer), vec!["0v0"]);
+            assert_eq!(get_entities(right_producer), vec!["1v0", "2v0"]);
+
+            let producer = QueryProducer::new(&world, &query_state, 0, 0);
+            let (left_producer, right_producer) = producer.split_at(2);
+            assert_eq!(get_entities(left_producer), vec!["0v0", "1v0"]);
+            assert_eq!(get_entities(right_producer), vec!["2v0"]);
+        }
+
+        #[test]
+        fn split_multiple_archetypes() {
+            #[derive(Component)]
+            struct D;
+
+            #[derive(Component)]
+            struct E;
+
+            let mut world = World::new();
+
+            for _ in 0..3 {
+                world.spawn(S);
+                world.spawn((S, D));
+            }
+            world.spawn(D);
+            world.spawn((S, E));
+
+            let query_state = QueryState::<Entity, With<S>>::new(&mut world);
 
             // split on a table boundary
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
