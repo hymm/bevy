@@ -25,6 +25,9 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
     P: Producer<Item = T> + 'scope,
     F: FnOnce(T) + Send + Sync + Clone + 'scope,
 {
+    #[cfg(feature = "trace")]
+    let _span = tracing::info_span!("execute_operation").entered();
+
     if length > batch_size {
         let mid = length / 2;
         let (left_producer, right_producer) = producer.split_at(mid);
@@ -35,6 +38,9 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
             move || execute_operation(scope, op, right_producer, length - mid, batch_size),
         );
     } else {
+        #[cfg(feature = "trace")]
+        let _span = tracing::info_span!("run op").entered();
+
         for item in producer.into_iter() {
             op.clone()(item);
         }
