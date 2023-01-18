@@ -1118,32 +1118,34 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
     }
 
     fn len(&self) -> usize {
-        let (remaining_matched, last_remaining): (usize, _) = if Self::IS_DENSE {
+        if Self::IS_DENSE {
             let ids = self.table_ids.iter();
-            let remaining_matched = ids
+            let mut sum: usize = ids
                 .map(|id| self.world.storages.tables[*id].entity_count())
                 .sum();
-            let last_remaining = if let Some(last_table_id) = self.table_ids.last() {
-                self.world.storages.tables[*last_table_id]
-                    .entity_count()
-                    .saturating_sub(self.last_row)
-            } else {
-                0
-            };
-            (remaining_matched, last_remaining)
+            sum -= self.start_row;
+            if self.table_ids.len() == 1 {
+                sum = sum.min(self.last_row);
+            } else if let Some(last_id) = self.table_ids.last() {
+                let last_table_len = self.world.storages.tables[*last_id].entity_count();
+                // cap position at table len and adjust sum
+                sum -= last_table_len - last_table_len.min(self.last_row);
+            }
+            sum
         } else {
             let ids = self.archetype_ids.iter();
-            let remaining_matched = ids.map(|id| self.world.archetypes[*id].len()).sum();
-            let last_remaining = if let Some(last_archetype_id) = self.archetype_ids.last() {
-                self.world.archetypes[*last_archetype_id]
-                    .len()
-                    .saturating_sub(self.last_row)
-            } else {
-                0
-            };
-            (remaining_matched, last_remaining)
-        };
-        remaining_matched - self.start_row - last_remaining
+            let mut sum: usize = ids.map(|id| self.world.archetypes[*id].len()).sum();
+            // adjust for start_row
+            sum -= self.start_row;
+            // adjust for last_row
+            if self.archetype_ids.len() == 1 {
+                sum = sum.min(self.last_row);
+            } else if let Some(last_id) = self.archetype_ids.last() {
+                let last_table_len = self.world.archetypes[*last_id].len();
+                sum -= last_table_len - last_table_len.min(self.last_row);
+            }
+            sum
+        }
     }
 
     fn split_at(self, position: usize) -> (Self, Self) {
