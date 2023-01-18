@@ -25,9 +25,6 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
     P: Producer<Item = T> + 'scope,
     F: Fn(T) + Send + Sync + Clone + 'scope,
 {
-    #[cfg(feature = "trace")]
-    let _span = tracing::info_span!("execute_operation").entered();
-
     if length > batch_size {
         let mid = length / 2;
         let (left_producer, right_producer) = producer.split_at(mid);
@@ -39,7 +36,12 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
         );
     } else {
         #[cfg(feature = "trace")]
-        let _span = tracing::info_span!("run op").entered();
+        let _span = tracing::info_span!(
+            "op",
+            item = std::any::type_name::<<P as Producer>::Item>(),
+            length = producer.len(),
+        )
+        .entered();
 
         for item in producer.into_iter() {
             op(item);
