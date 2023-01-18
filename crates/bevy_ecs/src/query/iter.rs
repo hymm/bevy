@@ -852,6 +852,17 @@ pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     last_row: usize,
 }
 
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Debug for QueryProducer<'w, 's, Q, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryProducer")
+            .field("table_ids", &self.table_ids)
+            .field("archetype_ids", &self.archetype_ids)
+            .field("start_row", &self.start_row)
+            .field("last_row", &self.last_row)
+            .finish()
+    }
+}
+
 impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
 
@@ -1022,18 +1033,30 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     fn split_table_ids(&self, position: usize) -> (&'s [TableId], &'s [TableId], usize, usize) {
         let mut sum = 0;
         let length = self.table_ids.len();
-        let table_index = self.table_ids.iter().enumerate().position(|(index, id)| {
-            if index == 0 {
-                sum += self.world.storages.tables[*id].entity_count() - self.start_row;
-            } else if index == length - 1 {
-                sum += self
-                    .last_row
-                    .min(self.world.storages.tables[*id].entity_count());
-            } else {
-                sum += self.world.storages.tables[*id].entity_count();
-            }
-            sum >= position
-        });
+        let table_index = self
+            .table_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                // adjust table counts for start_row and last_row
+                if length == 1 {
+                    self.last_row
+                        .min(self.world.storages.tables[*id].entity_count())
+                        - self.start_row
+                } else if index == 0 {
+                    self.world.storages.tables[*id].entity_count() - self.start_row
+                } else if index == length - 1 {
+                    self.last_row
+                        .min(self.world.storages.tables[*id].entity_count())
+                } else {
+                    self.world.storages.tables[*id].entity_count()
+                }
+            })
+            .position(|count| {
+                sum += count;
+                sum >= position
+            });
+
         if let Some(table_index) = table_index {
             // the boundary is at the end of a table
             if sum == position {
@@ -1044,9 +1067,17 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     0,
                 )
             } else {
-                let table_len =
-                    self.world.storages.tables[self.table_ids[table_index]].entity_count();
-                let break_row = table_len - (sum - position);
+                let break_row = if table_index == 0 {
+                    self.start_row + position
+                } else {
+                    let table_len =
+                        self.world.storages.tables[self.table_ids[table_index]].entity_count();
+                    if table_index == length - 1 {
+                        table_len.min(self.last_row) - (sum - position)
+                    } else {
+                        table_len - (sum - position)
+                    }
+                };
                 (
                     &self.table_ids[..table_index + 1],
                     &self.table_ids[table_index..],
@@ -1055,6 +1086,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 )
             }
         } else {
+            // this is probably wrong, but I'm not sure it's possible to hit it as
             (self.table_ids, &[], usize::MAX, 0)
         }
     }
@@ -1070,16 +1102,23 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             .archetype_ids
             .iter()
             .enumerate()
-            .position(|(index, id)| {
-                if index == 0 {
-                    sum += self.world.archetypes[*id].len() - self.start_row;
+            .map(|(index, id)| {
+                // adjust table counts for start_row and last_row
+                if length == 1 {
+                    self.last_row.min(self.world.archetypes[*id].len()) - self.start_row
+                } else if index == 0 {
+                    self.world.archetypes[*id].len() - self.start_row
                 } else if index == length - 1 {
-                    sum += self.last_row.min(self.world.archetypes[*id].len());
+                    self.last_row.min(self.world.archetypes[*id].len())
                 } else {
-                    sum += self.world.archetypes[*id].len();
+                    self.world.archetypes[*id].len()
                 }
+            })
+            .position(|count| {
+                sum += count;
                 sum >= position
             });
+
         if let Some(archetype_index) = archetype_index {
             // the boundary is at the end of a table
             if sum == position {
@@ -1090,8 +1129,17 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     0,
                 )
             } else {
-                let table_len = self.world.archetypes[self.archetype_ids[archetype_index]].len();
-                let break_row = table_len - (sum - position);
+                let break_row = if archetype_index == 0 {
+                    self.start_row + position
+                } else {
+                    let table_len =
+                        self.world.archetypes[self.archetype_ids[archetype_index]].len();
+                    if archetype_index == length - 1 {
+                        table_len.min(self.last_row) - (sum - position)
+                    } else {
+                        table_len - (sum - position)
+                    }
+                };
                 (
                     &self.archetype_ids[..archetype_index + 1],
                     &self.archetype_ids[archetype_index..],
@@ -1100,6 +1148,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 )
             }
         } else {
+            // this is probably wrong, but I'm not sure it's possible to hit it as
             (self.archetype_ids, &[], usize::MAX, 0)
         }
     }
@@ -1119,32 +1168,41 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
 
     fn len(&self) -> usize {
         if Self::IS_DENSE {
-            let ids = self.table_ids.iter();
-            let mut sum: usize = ids
-                .map(|id| self.world.storages.tables[*id].entity_count())
-                .sum();
-            sum -= self.start_row;
             if self.table_ids.len() == 1 {
-                sum = sum.min(self.last_row);
-            } else if let Some(last_id) = self.table_ids.last() {
-                let last_table_len = self.world.storages.tables[*last_id].entity_count();
-                // cap position at table len and adjust sum
-                sum -= last_table_len - last_table_len.min(self.last_row);
+                self.world.storages.tables[self.table_ids[0]]
+                    .entity_count()
+                    .min(self.last_row)
+                    - self.start_row
+            } else {
+                let ids = self.table_ids.iter();
+                let mut sum: usize = ids
+                    .map(|id| self.world.storages.tables[*id].entity_count())
+                    .sum();
+                sum -= self.start_row;
+                if let Some(last_id) = self.table_ids.last() {
+                    let last_table_len = self.world.storages.tables[*last_id].entity_count();
+                    // cap position at table len and adjust sum
+                    sum -= last_table_len - last_table_len.min(self.last_row);
+                }
+                sum
             }
-            sum
         } else {
-            let ids = self.archetype_ids.iter();
-            let mut sum: usize = ids.map(|id| self.world.archetypes[*id].len()).sum();
-            // adjust for start_row
-            sum -= self.start_row;
-            // adjust for last_row
-            if self.archetype_ids.len() == 1 {
-                sum = sum.min(self.last_row);
-            } else if let Some(last_id) = self.archetype_ids.last() {
-                let last_table_len = self.world.archetypes[*last_id].len();
-                sum -= last_table_len - last_table_len.min(self.last_row);
+            if self.table_ids.len() == 1 {
+                self.world.archetypes[self.archetype_ids[0]]
+                    .len()
+                    .min(self.last_row)
+                    - self.start_row
+            } else {
+                let ids = self.archetype_ids.iter();
+                let mut sum: usize = ids.map(|id| self.world.archetypes[*id].len()).sum();
+                sum -= self.start_row;
+                if let Some(last_id) = self.archetype_ids.last() {
+                    let last_table_len = self.world.archetypes[*last_id].len();
+                    // cap position at table len and adjust sum
+                    sum -= last_table_len - last_table_len.min(self.last_row);
+                }
+                sum
             }
-            sum
         }
     }
 
@@ -1383,19 +1441,18 @@ mod tests {
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
             let (left_producer, right_producer) = producer.split_at(5);
 
-            assert_eq!(
-                get_entities(left_producer),
-                vec!["0v0", "1v0", "2v0", "3v0", "4v0"]
-            );
-
-            let (left_producer, right_producer) = right_producer.split_at(2);
-            assert_eq!(
-                (get_entities(left_producer), get_entities(right_producer)),
-                (
-                    vec!["5v0".into(), "6v0".into()],
-                    vec!["7v0".into(), "8v0".into(), "9v0".into()]
-                )
-            );
+            {
+                let (left_producer, right_producer) = left_producer.split_at(2);
+                let (left_producer_a, right_producer_a) = left_producer.split_at(1);
+                assert_eq!(get_entities(left_producer_a), vec!["0v0"]);
+                assert_eq!(get_entities(right_producer_a), vec!["1v0"]);
+                let (left_producer_a, right_producer_a) = right_producer.split_at(1);
+                assert_eq!(get_entities(left_producer_a), vec!["2v0"]);
+                assert_eq!(get_entities(right_producer_a), vec!["3v0", "4v0"]);
+            }
+            let (left_producer_2, right_producer_2) = right_producer.split_at(2);
+            assert_eq!(get_entities(left_producer_2), vec!["5v0", "6v0"]);
+            assert_eq!(get_entities(right_producer_2), vec!["7v0", "8v0", "9v0"]);
         }
 
         #[test]
@@ -1407,19 +1464,13 @@ mod tests {
             let producer = QueryProducer::new(&world, &query_state, 0, 0);
             let (left_producer, right_producer) = producer.split_at(5);
 
-            assert_eq!(
-                get_entities(left_producer),
-                vec!["0v0", "1v0", "2v0", "3v0", "4v0"]
-            );
+            let (left_producer_1, right_producer_1) = left_producer.split_at(2);
+            assert_eq!(get_entities(left_producer_1), vec!["0v0", "1v0"]);
+            assert_eq!(get_entities(right_producer_1), vec!["2v0", "3v0", "4v0"]);
 
-            let (left_producer, right_producer) = right_producer.split_at(2);
-            assert_eq!(
-                (get_entities(left_producer), get_entities(right_producer)),
-                (
-                    vec!["5v0".into(), "6v0".into()],
-                    vec!["7v0".into(), "8v0".into(), "9v0".into()]
-                )
-            );
+            let (left_producer_2, right_producer_2) = right_producer.split_at(2);
+            assert_eq!(get_entities(left_producer_2), vec!["5v0", "6v0"]);
+            assert_eq!(get_entities(right_producer_2), vec!["7v0", "8v0", "9v0"]);
         }
     }
 }

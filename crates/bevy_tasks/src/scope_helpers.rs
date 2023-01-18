@@ -1,4 +1,5 @@
 use crate::Scope;
+use core::fmt::Debug;
 
 /// this function runs one task on the current thread and spawns the second task on the scope
 fn join_tasks<'scope, 'env, A, B>(scope: &'scope Scope<'scope, 'env, ()>, task_a: A, task_b: B)
@@ -22,7 +23,7 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
     batch_size: usize,
 ) where
     'env: 'scope,
-    P: Producer<Item = T> + 'scope,
+    P: Producer<Item = T> + Debug + 'scope,
     F: Fn(T) + Send + Sync + Clone + 'scope,
 {
     if length > batch_size {
