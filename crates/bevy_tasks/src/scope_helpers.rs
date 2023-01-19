@@ -44,9 +44,7 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
         )
         .entered();
 
-        for item in producer.into_iter() {
-            op(item);
-        }
+        producer.into_iter().for_each(op);
     }
 }
 
