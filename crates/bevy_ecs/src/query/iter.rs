@@ -891,19 +891,73 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     /// have unique access to the components they query.
     /// This does not validate that `world.id()` matches `query_state.world_id`. Calling this on a `world`
     /// with a mismatched [`WorldId`](crate::world::WorldId) is unsound.
-    pub unsafe fn into_iter(self) -> QueryProducerIter<'w, 's, Q, F> {
-        let fetch = Q::init_fetch(
+    pub unsafe fn into_iter(self) -> ProducerIter<'w, 's, Q, F> {
+        let mut fetch = Q::init_fetch(
             self.world,
             &self.query_state.fetch_state,
             self.last_change_tick,
             self.change_tick,
         );
-        let filter = F::init_fetch(
+        let mut filter = F::init_fetch(
             self.world,
             &self.query_state.filter_state,
             self.last_change_tick,
             self.change_tick,
         );
+
+        if Self::IS_DENSE && self.table_ids.len() == 1 {
+            let table = self
+                .world
+                .storages
+                .tables
+                .get(self.table_ids[0])
+                .debug_checked_unwrap();
+
+            Q::set_table(&mut fetch, &self.query_state.fetch_state, table);
+            F::set_table(&mut filter, &self.query_state.filter_state, table);
+
+            let entities = table.entities();
+            return ProducerIter::Simple(QuerySimpleIter {
+                fetch,
+                filter,
+                start_row: self.start_row,
+                table_entities_iter: entities[self.start_row..self.last_row.min(entities.len())]
+                    .iter()
+                    .enumerate(),
+                archetype_entities_iter: [].iter(), // unused in this branch
+                _phantom_data: PhantomData::default(),
+            });
+        } else if self.archetype_ids.len() == 1 {
+            let archetype = self
+                .world
+                .archetypes
+                .get(self.archetype_ids[0])
+                .debug_checked_unwrap();
+            // SAFETY: `archetype` and `tables` are from the world that `fetch/filter` were created for,
+            // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
+            let table = self
+                .world
+                .storages
+                .tables
+                .get(archetype.table_id())
+                .debug_checked_unwrap();
+
+            Q::set_table(&mut fetch, &self.query_state.fetch_state, table);
+            F::set_table(&mut filter, &self.query_state.filter_state, table);
+
+            let entities = archetype.entities();
+
+            return ProducerIter::Simple(QuerySimpleIter {
+                fetch,
+                filter,
+                start_row: self.start_row,
+                table_entities_iter: [].iter().enumerate(), // unused in this branch
+                archetype_entities_iter: entities
+                    [self.start_row..self.last_row.min(entities.len())]
+                    .iter(),
+                _phantom_data: PhantomData::default(),
+            });
+        }
 
         let mut cursor = QueryProducerCursor {
             table_id_iter: self.table_ids.iter().peekable(),
@@ -966,12 +1020,12 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             cursor.current_row = self.start_row;
         }
 
-        QueryProducerIter {
+        ProducerIter::Multiple(QueryProducerIter {
             query_state: self.query_state,
             tables: &self.world.storages.tables,
             archetypes: &self.world.archetypes,
             cursor,
-        }
+        })
     }
 
     pub fn split_at(self, position: usize) -> (Self, Self) {
@@ -1158,7 +1212,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
     for QueryProducer<'w, 's, Q, F>
 {
     type Item = Q::Item<'w>;
-    type IntoIter = QueryProducerIter<'w, 's, Q, F>;
+    type IntoIter = ProducerIter<'w, 's, Q, F>;
 
     fn into_iter(self) -> Self::IntoIter {
         // todo: write a real safety comment.
@@ -1208,6 +1262,88 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
 
     fn split_at(self, position: usize) -> (Self, Self) {
         self.split_at(position)
+    }
+}
+
+pub enum ProducerIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
+    Simple(QuerySimpleIter<'w, 's, Q, F>),
+    Multiple(QueryProducerIter<'w, 's, Q, F>),
+}
+
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for ProducerIter<'w, 's, Q, F> {
+    type Item = Q::Item<'w>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ProducerIter::Simple(inner) => unsafe { inner.next() },
+            ProducerIter::Multiple(inner) => unsafe { inner.next() },
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            ProducerIter::Simple(inner) => inner.size_hint(),
+            ProducerIter::Multiple(inner) => inner.size_hint(),
+        }
+    }
+}
+
+/// iterator over part of a single table or archetype
+pub struct QuerySimpleIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
+    fetch: Q::Fetch<'w>,
+    filter: F::Fetch<'w>,
+    start_row: usize,
+    table_entities_iter: std::iter::Enumerate<std::slice::Iter<'w, Entity>>,
+    archetype_entities_iter: std::slice::Iter<'w, ArchetypeEntity>,
+    _phantom_data: PhantomData<&'s ()>,
+}
+
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F> {
+    const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
+
+    #[inline(always)]
+    unsafe fn next(&mut self) -> Option<Q::Item<'w>> {
+        if Self::IS_DENSE {
+            loop {
+                // SAFETY: set_table was called when constructing QuerySimpleIter.
+                let (index, entity) = self.table_entities_iter.next()?;
+
+                let row = TableRow::new(index + self.start_row);
+                if !F::filter_fetch(&mut self.filter, *entity, row) {
+                    continue;
+                }
+
+                // SAFETY: set_table was called prior.
+                // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
+                return Some(Q::fetch(&mut self.fetch, *entity, row));
+            }
+        } else {
+            loop {
+                // SAFETY: set_table was called when constructing QuerySimpleIter.
+                let entity = self.archetype_entities_iter.next()?;
+                if !F::filter_fetch(&mut self.filter, entity.entity(), entity.table_row()) {
+                    continue;
+                }
+
+                // SAFETY: set_table was called prior.
+                // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
+                return Some(Q::fetch(&mut self.fetch, entity.entity(), entity.table_row()));
+            }
+        }
+    }
+}
+
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for QuerySimpleIter<'w, 's, Q, F> {
+    type Item = Q::Item<'w>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe { self.next() }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.table_entities_iter.size_hint()
     }
 }
 
@@ -1266,7 +1402,10 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for QueryProducerIte
 }
 
 // This is correct as [`QueryIter`] always returns `None` once exhausted.
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> FusedIterator for QueryProducerIter<'w, 's, Q, F> {}
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> FusedIterator
+    for QueryProducerIter<'w, 's, Q, F>
+{
+}
 
 struct QueryProducerCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     table_id_iter: std::iter::Peekable<std::slice::Iter<'s, TableId>>,
