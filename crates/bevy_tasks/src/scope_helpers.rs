@@ -29,11 +29,13 @@ pub fn execute_operation<'scope, 'env, F, P, T>(
     if length > batch_size {
         let mid = length / 2;
         let (left_producer, right_producer) = producer.split_at(mid);
+        let left_length = left_producer.len();
+        let right_length = right_producer.len();
         let op_a = op.clone();
         join_tasks(
             scope,
-            move || execute_operation(scope, op_a, left_producer, mid, batch_size),
-            move || execute_operation(scope, op, right_producer, length - mid, batch_size),
+            move || execute_operation(scope, op_a, left_producer, left_length, batch_size),
+            move || execute_operation(scope, op, right_producer, right_length, batch_size),
         );
     } else {
         #[cfg(feature = "trace")]
