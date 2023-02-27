@@ -212,7 +212,7 @@ jobs:
           mkdir -p ./example-run
           echo ${{ github.event.number }} > ./example-run/NR
           mv last_example_run ./example-run/
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: ${{ failure() && github.event_name == 'pull_request' }}
         with:
           name: example-run
@@ -277,7 +277,7 @@ jobs:
       - name: log failed task - missing update
         if: ${{ failure() && github.event_name == 'pull_request' && steps.missing-update.conclusion == 'failure' }}
         run: touch ./missing-examples/missing-update
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: ${{ failure() && github.event_name == 'pull_request' }}
         with:
           name: missing-examples
@@ -338,7 +338,7 @@ jobs:
         run: |
           mkdir -p ./msrv
           echo ${{ github.event.number }} > ./msrv/NR
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: ${{ failure() && github.event_name == 'pull_request' }}
         with:
           name: msrv
