@@ -652,10 +652,8 @@ pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     query_state: &'s QueryState<Q, F>,
     last_change_tick: u32,
     change_tick: u32,
-    table_ids: &'s [TableId],
-    archetype_ids: &'s [ArchetypeId],
-    start_row: usize,
-    last_row: usize,
+    table_ids: Vec<(TableId, &'s [Entity])>,
+    archetype_ids: Vec<(ArcheTypeId, &'s [ArchetypeEntity])>,
 }
 
 impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Debug for QueryProducer<'w, 's, Q, F> {
@@ -663,8 +661,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Debug for QueryProducer<'w, '
         f.debug_struct("QueryProducer")
             .field("table_ids", &self.table_ids)
             .field("archetype_ids", &self.archetype_ids)
-            .field("start_row", &self.start_row)
-            .field("last_row", &self.last_row)
             .finish()
     }
 }
@@ -685,8 +681,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             change_tick,
             table_ids: &query_state.matched_table_ids,
             archetype_ids: &query_state.matched_archetype_ids,
-            start_row: 0,
-            last_row: usize::MAX,
         }
     }
 
@@ -712,15 +706,14 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         );
 
         let mut cursor = QueryProducerCursor {
-            table_id_iter: self.table_ids.iter().peekable(),
-            archetype_id_iter: self.archetype_ids.iter().peekable(),
+            table_id_iter: self.table_ids,
+            archetype_id_iter: self.archetype_ids,
             table_entities: &[],
             archetype_entities: &[],
             fetch,
             filter,
             current_len: 0,
             current_row: self.start_row,
-            last_row: self.last_row,
             phantom: PhantomData::default(),
         };
 
@@ -792,8 +785,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     change_tick: self.change_tick,
                     table_ids: left_table_ids,
                     archetype_ids: &[],
-                    start_row: self.start_row,
-                    last_row: left_last_row,
                 },
                 Self {
                     world: self.world,
@@ -802,8 +793,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     change_tick: self.change_tick,
                     table_ids: right_table_ids,
                     archetype_ids: &[],
-                    start_row: right_start_row,
-                    last_row: self.last_row,
                 },
             )
         } else {
@@ -818,8 +807,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     change_tick: self.change_tick,
                     table_ids: &[],
                     archetype_ids: left_archetype_ids,
-                    start_row: self.start_row,
-                    last_row: left_last_row,
                 },
                 Self {
                     world: self.world,
@@ -828,36 +815,22 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     change_tick: self.change_tick,
                     table_ids: &[],
                     archetype_ids: right_archetype_ids,
-                    start_row: right_start_row,
-                    last_row: self.last_row,
                 },
             )
         }
     }
 
     #[inline]
-    fn split_table_ids(&self, position: usize) -> (&'s [TableId], &'s [TableId], usize, usize) {
+    fn split_table_ids(
+        &self,
+        position: usize,
+    ) -> (Vec<(TableId, &'s [Entity])>, Vec<(TableId, &'s [Entity])>) {
         let mut sum = 0;
         let length = self.table_ids.len();
         let table_index = self
             .table_ids
             .iter()
-            .enumerate()
-            .map(|(index, id)| {
-                // adjust table counts for start_row and last_row
-                if length == 1 {
-                    self.last_row
-                        .min(self.world.storages.tables[*id].entity_count())
-                        - self.start_row
-                } else if index == 0 {
-                    self.world.storages.tables[*id].entity_count() - self.start_row
-                } else if index == length - 1 {
-                    self.last_row
-                        .min(self.world.storages.tables[*id].entity_count())
-                } else {
-                    self.world.storages.tables[*id].entity_count()
-                }
-            })
+            .map(|(table_id, entities)| entities.len())
             .position(|count| {
                 sum += count;
                 sum >= position
@@ -869,21 +842,20 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 (
                     &self.table_ids[..table_index + 1],
                     &self.table_ids[table_index + 1..],
-                    usize::MAX, // go to the end of the table
-                    0,
                 )
             } else {
                 let break_row = if table_index == 0 {
-                    self.start_row + position
+                    position
                 } else {
-                    let table_len =
-                        self.world.storages.tables[self.table_ids[table_index]].entity_count();
+                    let table_len = self.table_ids[table_index].1.len();
                     if table_index == length - 1 {
-                        table_len.min(self.last_row) - (sum - position)
+                        (sum - position)
                     } else {
                         table_len - (sum - position)
                     }
                 };
+
+                // todo: need to split the slice of entities somehow.
                 (
                     &self.table_ids[..table_index + 1],
                     &self.table_ids[table_index..],
@@ -893,7 +865,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             }
         } else {
             // this is probably wrong, but I'm not sure it's possible to hit it as
-            (self.table_ids, &[], usize::MAX, 0)
+            (self.table_ids, &[])
         }
     }
 
@@ -907,19 +879,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         let archetype_index = self
             .archetype_ids
             .iter()
-            .enumerate()
-            .map(|(index, id)| {
-                // adjust table counts for start_row and last_row
-                if length == 1 {
-                    self.last_row.min(self.world.archetypes[*id].len()) - self.start_row
-                } else if index == 0 {
-                    self.world.archetypes[*id].len() - self.start_row
-                } else if index == length - 1 {
-                    self.last_row.min(self.world.archetypes[*id].len())
-                } else {
-                    self.world.archetypes[*id].len()
-                }
-            })
+            .map(|(_, archetype_entities)| archetype_entites.len())
             .position(|count| {
                 sum += count;
                 sum >= position
@@ -931,17 +891,14 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 (
                     &self.archetype_ids[..archetype_index + 1],
                     &self.archetype_ids[archetype_index + 1..],
-                    usize::MAX, // go to the end of the table
-                    0,
                 )
             } else {
                 let break_row = if archetype_index == 0 {
-                    self.start_row + position
+                    position
                 } else {
-                    let table_len =
-                        self.world.archetypes[self.archetype_ids[archetype_index]].len();
+                    let table_len = self.archetype_ids[archetype_index].1.len();
                     if archetype_index == length - 1 {
-                        table_len.min(self.last_row) - (sum - position)
+                        (sum - position)
                     } else {
                         table_len - (sum - position)
                     }
@@ -1072,11 +1029,14 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for QueryProducerIte
 }
 
 // This is correct as [`QueryIter`] always returns `None` once exhausted.
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> FusedIterator for QueryProducerIter<'w, 's, Q, F> {}
+impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> FusedIterator
+    for QueryProducerIter<'w, 's, Q, F>
+{
+}
 
 struct QueryProducerCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
-    table_id_iter: std::iter::Peekable<std::slice::Iter<'s, TableId>>,
-    archetype_id_iter: std::iter::Peekable<std::slice::Iter<'s, ArchetypeId>>,
+    table_id_iter: std::slice::Iter<'s, (TableId, &'s [Entity])>,
+    archetype_id_iter: std::slice::Iter<'s, (ArchetypeId, &'s [ArchetypeEntity])>,
     table_entities: &'w [Entity],
     archetype_entities: &'w [ArchetypeEntity],
     fetch: Q::Fetch<'w>,
@@ -1085,8 +1045,6 @@ struct QueryProducerCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     current_len: usize,
     // either table row or archetype index, depending on whether both `Q`'s and `F`'s fetches are dense
     current_row: usize,
-    // stop at this row, if non will stop at last row
-    last_row: usize,
     phantom: PhantomData<Q>,
 }
 
@@ -1157,7 +1115,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducerCursor<'w, 's, Q
             archetype_id_iter: query_state.matched_archetype_ids.iter().peekable(),
             current_len: 0,
             current_row: 0,
-            last_row: usize::MAX,
             phantom: PhantomData,
         }
     }
@@ -1215,14 +1172,14 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducerCursor<'w, 's, Q
             loop {
                 // we are on the beginning of the query, or finished processing a table, so skip to the next
                 if self.current_row == self.current_len {
-                    let table_id = self.table_id_iter.next()?;
+                    let (table_id, table_entities) = self.table_id_iter.next()?;
                     let table = tables.get(*table_id).debug_checked_unwrap();
                     // SAFETY: `table` is from the world that `fetch/filter` were created for,
                     // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
                     Q::set_table(&mut self.fetch, &query_state.fetch_state, table);
                     F::set_table(&mut self.filter, &query_state.filter_state, table);
-                    self.table_entities = table.entities();
-                    self.current_len = table.entity_count();
+                    self.table_entities = table_entities;
+                    self.current_len = table_entities.len();
                     self.current_row = 0;
                     continue;
                 }
@@ -1251,7 +1208,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducerCursor<'w, 's, Q
         } else {
             loop {
                 if self.current_row == self.current_len {
-                    let archetype_id = self.archetype_id_iter.next()?;
+                    let (archetype_id, archetype_entities) = self.archetype_id_iter.next()?;
                     let archetype = archetypes.get(*archetype_id).debug_checked_unwrap();
                     // SAFETY: `archetype` and `tables` are from the world that `fetch/filter` were created for,
                     // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
@@ -1263,8 +1220,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducerCursor<'w, 's, Q
                         archetype,
                         table,
                     );
-                    self.archetype_entities = archetype.entities();
-                    self.current_len = archetype.len();
+                    self.archetype_entities = archetype_entities;
+                    self.current_len = archetype_entities.len();
                     self.current_row = 0;
                     continue;
                 }
@@ -1279,11 +1236,6 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducerCursor<'w, 's, Q
                 ) {
                     self.current_row += 1;
                     continue;
-                }
-
-                // end iteration if we've hit the last row
-                if self.archetype_id_iter.peek().is_none() && self.last_row == self.current_row {
-                    return None;
                 }
 
                 // SAFETY: set_archetype was called prior, `current_row` is an archetype index in range of the current archetype
