@@ -4,12 +4,14 @@ use std::{
     mem,
     panic::AssertUnwindSafe,
     sync::Arc,
+    task::Poll,
     thread::{self, JoinHandle},
 };
 
 use async_task::FallibleTask;
 use concurrent_queue::ConcurrentQueue;
-use futures_lite::{future, FutureExt};
+use futures::stream::FuturesUnordered;
+use futures_lite::{future, FutureExt, StreamExt};
 
 use crate::{
     thread_executor::{ThreadExecutor, ThreadExecutorTicker},
@@ -372,9 +374,12 @@ impl TaskPool {
             future::block_on(async move {
                 let get_results = async {
                     let mut results = Vec::with_capacity(spawned.len());
-                    while let Ok(task) = spawned.pop() {
-                        results.push(task.await.unwrap());
-                    }
+                    let poller = GetResults {
+                        queue: spawned,
+                        polling: FuturesUnordered::new(),
+                        results: &mut results,
+                    };
+                    poller.await;
                     results
                 };
 
@@ -631,6 +636,45 @@ where
                 task.cancel().await;
             }
         });
+    }
+}
+
+struct GetResults<'scope, T> {
+    queue: &'scope ConcurrentQueue<FallibleTask<T>>,
+    polling: FuturesUnordered<FallibleTask<T>>,
+    results: &'scope mut Vec<T>,
+}
+
+impl<'scope, T> Future for GetResults<'scope, T> {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        while let Ok(task) = self.queue.pop() {
+            self.polling.push(task);
+        }
+
+        loop {
+            match self.polling.poll_next(cx) {
+                Poll::Ready(Some(result)) => {
+                    self.results.push(result.unwrap());
+                    continue;
+                }
+                Poll::Ready(None) => {
+                    if let Ok(task) = self.queue.pop() {
+                        self.polling.push(task);
+                        return Poll::Pending;
+                    } else {
+                        return Poll::Ready(());
+                    }
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
     }
 }
 
