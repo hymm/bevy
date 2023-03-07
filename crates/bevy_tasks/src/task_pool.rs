@@ -852,6 +852,46 @@ mod tests {
     }
 
     #[test]
+    fn test_one_nested_spawn() {
+        let pool = TaskPool::new();
+
+        let foo = Box::new(42);
+        let foo = &*foo;
+
+        let count = Arc::new(AtomicI32::new(0));
+
+        let (send, recv) = async_channel::unbounded::<()>();
+
+        let outputs: Vec<i32> = pool.scope(|scope| {
+            let count_clone = count.clone();
+            scope.spawn(async move {
+                let count_clone_clone = count_clone.clone();
+                scope.spawn(async move {
+                    if *foo != 42 {
+                        panic!("not 42!?!?");
+                    } else {
+                        count_clone_clone.fetch_add(1, Ordering::Relaxed);
+                    }
+                    send.send(()).await.unwrap();
+                    *foo
+                });
+
+                recv.recv().await.unwrap();
+
+                *foo
+            });
+        });
+
+        for output in &outputs {
+            assert_eq!(*output, 42);
+        }
+
+        // the inner loop runs 100 times and the outer one runs 10. 100 + 10
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
     fn test_nested_spawn() {
         let pool = TaskPool::new();
 
@@ -925,5 +965,19 @@ mod tests {
         barrier.wait();
         assert!(!thread_check_failed.load(Ordering::Acquire));
         assert_eq!(count.load(Ordering::Acquire), 200);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_should_propagate() {
+        let pool = TaskPool::new();
+
+        pool.scope_with_executor(false, None, |scope| {
+            // first task should not block second task from being polled
+            scope.spawn(std::future::pending());
+            scope.spawn(async {
+                panic!("task panics!");
+            });
+        });
     }
 }
