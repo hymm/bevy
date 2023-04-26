@@ -3,7 +3,7 @@ use crate::change_detection::{Mut, MutUntyped};
 use crate::component::{ComponentId, Tick};
 use crate::entity::{Entities, Entity};
 use crate::prelude::{Component, QueryState};
-use crate::system::{CommandQueue, Commands, Deferred, SystemMeta, SystemParam, Local};
+use crate::system::{CommandQueue, Commands, SystemMeta, SystemParam};
 use crate::world::unsafe_world_cell::UnsafeWorldCell;
 use crate::world::World;
 use bevy_ecs_macros::Resource;
@@ -141,14 +141,12 @@ mod tests {
     use super::apply_commands;
     use crate as bevy_ecs;
     use crate::prelude::{Resource, World};
-    use crate::schedule::schedule_world::ScheduleWorld;
     use crate::schedule::{schedule_world::CommandsV2, IntoSystemConfigs, Schedule};
 
     #[test]
     fn it_can_apply_buffers() {
         let mut schedule = Schedule::new();
         let mut world = World::new();
-        world.insert_resource(ScheduleWorld::new(2));
 
         #[derive(Resource)]
         struct TestResource;

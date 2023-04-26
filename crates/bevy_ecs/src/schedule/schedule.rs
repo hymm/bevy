@@ -23,6 +23,8 @@ use crate::{
     world::World,
 };
 
+use super::schedule_world::ScheduleWorld;
+
 /// Resource that stores [`Schedule`]s mapped to [`ScheduleLabel`]s.
 #[derive(Default, Resource)]
 pub struct Schedules {
@@ -155,6 +157,7 @@ pub struct Schedule {
     executable: SystemSchedule,
     executor: Box<dyn SystemExecutor>,
     executor_initialized: bool,
+    schedule_world: Option<ScheduleWorld>,
 }
 
 impl Default for Schedule {
@@ -171,6 +174,7 @@ impl Schedule {
             executable: SystemSchedule::new(),
             executor: make_executor(ExecutorKind::default()),
             executor_initialized: false,
+            schedule_world: None,
         }
     }
 
@@ -232,7 +236,12 @@ impl Schedule {
     pub fn run(&mut self, world: &mut World) {
         world.check_change_ticks();
         self.initialize(world).unwrap_or_else(|e| panic!("{e}"));
-        self.executor.run(&mut self.executable, world);
+
+        self.with_schedule_world(world, |world, schedule| {
+            schedule.executor.run(&mut schedule.executable, world);
+        });
+
+        self.schedule_world = world.remove_resource::<ScheduleWorld>();
     }
 
     /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
@@ -241,7 +250,12 @@ impl Schedule {
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed {
-            self.graph.initialize(world);
+            self.schedule_world = Some(ScheduleWorld::new(self.graph.systems.len()));
+
+            self.with_schedule_world(world, |world, schedule| {
+                schedule.graph.initialize(world);
+            });
+
             self.graph
                 .update_schedule(&mut self.executable, world.components())?;
 
@@ -302,6 +316,24 @@ impl Schedule {
         for system in &mut self.executable.systems {
             system.apply_deferred(world);
         }
+    }
+
+    fn with_schedule_world<U>(
+        &mut self,
+        world: &mut World,
+        f: impl FnOnce(&mut World, &mut Schedule) -> U,
+    ) -> U {
+        // if we're running in a nested schedule we need to remove the existing schedule world
+        let old_schedule_world = world.remove_resource::<ScheduleWorld>();
+        world.insert_resource(self.schedule_world.take().unwrap());
+
+        let result = f(world, self);
+
+        self.schedule_world = world.remove_resource::<ScheduleWorld>();
+        if let Some(old_schedule_world) = old_schedule_world {
+            world.insert_resource(old_schedule_world);
+        }
+        result
     }
 }
 
