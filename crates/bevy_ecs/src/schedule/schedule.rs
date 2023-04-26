@@ -244,6 +244,7 @@ impl Schedule {
             self.graph.initialize(world);
             self.graph
                 .update_schedule(&mut self.executable, world.components())?;
+
             self.graph.changed = false;
             self.executor_initialized = false;
         }

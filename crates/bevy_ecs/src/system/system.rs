@@ -35,9 +35,10 @@ pub trait System: Send + Sync + 'static {
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId>;
     /// Returns true if the system is [`Send`].
     fn is_send(&self) -> bool;
-
     /// Returns true if the system must be run exclusively.
     fn is_exclusive(&self) -> bool;
+    /// Sets index of system in the schedule
+    fn set_schedule_index(&mut self, index: usize) {}
 
     /// Runs the system with the given input in the world. Unlike [`System::run`], this function
     /// can be called in parallel with other systems and may break Rust's aliasing rules

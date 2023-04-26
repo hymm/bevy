@@ -22,6 +22,7 @@ pub struct SystemMeta {
     // SystemParams from overriding each other
     is_send: bool,
     pub(crate) last_run: Tick,
+    pub(crate) schedule_index: Option<usize>,
 }
 
 impl SystemMeta {
@@ -32,6 +33,7 @@ impl SystemMeta {
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             last_run: Tick::new(0),
+            schedule_index: None,
         }
     }
 
@@ -440,6 +442,11 @@ where
     #[inline]
     fn is_exclusive(&self) -> bool {
         false
+    }
+
+    #[inline]
+    fn set_schedule_index(&mut self, index: usize) {
+        self.system_meta.schedule_index = Some(index);
     }
 
     #[inline]

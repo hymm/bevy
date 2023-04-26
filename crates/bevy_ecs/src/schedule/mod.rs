@@ -6,6 +6,7 @@ mod executor;
 mod graph_utils;
 #[allow(clippy::module_inception)]
 mod schedule;
+mod schedule_world;
 mod set;
 mod state;
 
