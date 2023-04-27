@@ -64,44 +64,47 @@ impl ScheduleWorld {
 #[derive(Component, Default)]
 pub struct ComponentCommandQueue(pub CommandQueue);
 
-pub struct ScheduleCommandQueue<'a> {
-    pub queue: Mut<'a, ComponentCommandQueue>,
-}
-
-pub struct ScheduleCommandQueueState {
-    schedule_data_id: ComponentId,
-    command_queue_id: ComponentId,
-}
-
 #[derive(SystemParam)]
 pub struct CommandsV2<'w> {
-    pub queue: ScheduleCommandQueue<'w>,
+    pub queue: ScheduleData<'w, ComponentCommandQueue>,
     pub entities: &'w Entities,
 }
 
 impl<'w> CommandsV2<'w> {
     pub fn into_commands(&mut self) -> Commands {
-        Commands::new_from_entities(&mut self.queue.queue.0, self.entities)
+        Commands::new_from_entities(&mut self.queue.data.0, self.entities)
     }
 }
 
-// SAFETY: TODO
-unsafe impl<'a> SystemParam for ScheduleCommandQueue<'a> {
-    type State = ScheduleCommandQueueState;
-    type Item<'w, 's> = ScheduleCommandQueue<'w>;
+pub struct ScheduleData<'a, T>
+where
+    T: Component + Default,
+{
+    data: Mut<'a, T>,
+}
+
+pub struct ScheduleDataState {
+    schedule_data_id: ComponentId,
+    command_queue_id: ComponentId,
+}
+
+// SAFETY: TODO.
+unsafe impl<'a, T> SystemParam for ScheduleData<'a, T>
+where
+    T: Component + Default,
+{
+    type State = ScheduleDataState;
+    type Item<'w, 's> = ScheduleData<'w, T>;
 
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         let schedule_data_id = world.initialize_resource::<ScheduleWorld>();
 
         let mut schedule_world = world.get_resource_mut::<ScheduleWorld>().unwrap();
         let schedule_world = schedule_world.as_mut();
-        let command_queue_id = schedule_world
-            .world
-            .init_component::<ComponentCommandQueue>();
-        schedule_world
-            .new_schedule_data::<ComponentCommandQueue>(system_meta.schedule_index.unwrap()); //TODO: get the system index from somewhere
+        let command_queue_id = schedule_world.world.init_component::<T>();
+        schedule_world.new_schedule_data::<T>(system_meta.schedule_index.unwrap()); //TODO: get the system index from somewhere
 
-        ScheduleCommandQueueState {
+        ScheduleDataState {
             schedule_data_id,
             command_queue_id,
         }
@@ -117,11 +120,11 @@ unsafe impl<'a> SystemParam for ScheduleCommandQueue<'a> {
             .get_resource_mut_by_id(state.schedule_data_id)
             .unwrap();
         let schedule_world: &mut ScheduleWorld = schedule_world.value.deref_mut();
-        let queue = schedule_world
+        let data = schedule_world
             .get_mut_by_id(system_meta.schedule_index.unwrap(), state.command_queue_id); // TODO: get the systems index from somewhere                                                              // let queue = queue2.as_mut();
 
-        ScheduleCommandQueue {
-            queue: queue.with_type(),
+        ScheduleData {
+            data: data.with_type(),
         }
     }
 }
