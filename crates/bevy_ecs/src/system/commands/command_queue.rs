@@ -3,7 +3,8 @@ use std::mem::MaybeUninit;
 use bevy_ptr::{OwningPtr, Unaligned};
 
 use super::Command;
-use crate::world::World;
+use crate as bevy_ecs;
+use crate::{prelude::Component, world::World};
 
 struct CommandMeta {
     /// SAFETY: The `value` must point to a value of type `T: Command`,
@@ -20,7 +21,7 @@ struct CommandMeta {
 // entities/components/resources, and it's not currently possible to parallelize these
 // due to mutable [`World`] access, maximizing performance for [`CommandQueue`] is
 // preferred to simplicity of implementation.
-#[derive(Default)]
+#[derive(Component, Default)]
 pub struct CommandQueue {
     // This buffer densely stores all queued commands.
     //

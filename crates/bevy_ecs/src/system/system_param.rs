@@ -1429,7 +1429,7 @@ pub mod lifetimeless {
     /// A [`ResMut`](super::ResMut) with `'static` lifetimes.
     pub type SResMut<T> = super::ResMut<'static, T>;
     /// [`Commands`](crate::system::Commands) with `'static` lifetimes.
-    pub type SCommands = crate::system::Commands<'static, 'static>;
+    pub type SCommands = crate::system::Commands<'static>;
 }
 
 /// A helper for using system parameters in generic contexts

@@ -5,6 +5,7 @@ use crate::{
     self as bevy_ecs,
     bundle::Bundle,
     entity::{Entities, Entity},
+    schedule::ScheduleData,
     world::{FromWorld, World},
 };
 use bevy_ecs_macros::SystemParam;
@@ -13,7 +14,7 @@ pub use command_queue::CommandQueue;
 pub use parallel_scope::*;
 use std::marker::PhantomData;
 
-use super::{Deferred, Resource, SystemBuffer, SystemMeta};
+use super::{Resource, SystemBuffer, SystemMeta};
 
 /// A [`World`] mutation.
 ///
@@ -109,8 +110,8 @@ pub trait Command: Send + 'static {
 /// [`apply_deferred`]: crate::schedule::apply_deferred
 /// [`Schedule::apply_deferred`]: crate::schedule::Schedule::apply_deferred
 #[derive(SystemParam)]
-pub struct Commands<'w, 's> {
-    queue: Deferred<'s, CommandQueue>,
+pub struct Commands<'w> {
+    pub queue: ScheduleData<'w, CommandQueue>,
     entities: &'w Entities,
 }
 
@@ -125,13 +126,13 @@ impl SystemBuffer for CommandQueue {
     }
 }
 
-impl<'w, 's> Commands<'w, 's> {
+impl<'w> Commands<'w> {
     /// Returns a new `Commands` instance from a [`CommandQueue`] and a [`World`].
     ///
     /// It is not required to call this constructor when using `Commands` as a [system parameter].
     ///
     /// [system parameter]: crate::system::SystemParam
-    pub fn new(queue: &'s mut CommandQueue, world: &'w World) -> Self {
+    pub fn new(queue: &'w mut CommandQueue, world: &'w World) -> Self {
         Self::new_from_entities(queue, world.entities())
     }
 
@@ -140,9 +141,9 @@ impl<'w, 's> Commands<'w, 's> {
     /// It is not required to call this constructor when using `Commands` as a [system parameter].
     ///
     /// [system parameter]: crate::system::SystemParam
-    pub fn new_from_entities(queue: &'s mut CommandQueue, entities: &'w Entities) -> Self {
+    pub fn new_from_entities(queue: &'w mut CommandQueue, entities: &'w Entities) -> Self {
         Self {
-            queue: Deferred(queue),
+            queue: ScheduleData::new(queue),
             entities,
         }
     }
@@ -182,7 +183,7 @@ impl<'w, 's> Commands<'w, 's> {
     ///
     /// - [`spawn`](Self::spawn) to spawn an entity with a bundle.
     /// - [`spawn_batch`](Self::spawn_batch) to spawn entities with a bundle each.
-    pub fn spawn_empty<'a>(&'a mut self) -> EntityCommands<'w, 's, 'a> {
+    pub fn spawn_empty<'a>(&'a mut self) -> EntityCommands<'w, 'a> {
         let entity = self.entities.reserve_entity();
         EntityCommands {
             entity,
@@ -204,7 +205,7 @@ impl<'w, 's> Commands<'w, 's> {
     /// [`Commands::spawn`]. This method should generally only be used for sharing entities across
     /// apps, and only when they have a scheme worked out to share an ID space (which doesn't happen
     /// by default).
-    pub fn get_or_spawn<'a>(&'a mut self, entity: Entity) -> EntityCommands<'w, 's, 'a> {
+    pub fn get_or_spawn<'a>(&'a mut self, entity: Entity) -> EntityCommands<'w, 'a> {
         self.add(move |world: &mut World| {
             world.get_or_spawn(entity);
         });
@@ -264,7 +265,7 @@ impl<'w, 's> Commands<'w, 's> {
     ///
     /// - [`spawn_empty`](Self::spawn_empty) to spawn an entity without any components.
     /// - [`spawn_batch`](Self::spawn_batch) to spawn entities with a bundle each.
-    pub fn spawn<'a, T: Bundle>(&'a mut self, bundle: T) -> EntityCommands<'w, 's, 'a> {
+    pub fn spawn<'a, T: Bundle>(&'a mut self, bundle: T) -> EntityCommands<'w, 'a> {
         let mut e = self.spawn_empty();
         e.insert(bundle);
         e
@@ -355,7 +356,7 @@ impl<'w, 's> Commands<'w, 's> {
     /// - [`entity`](Self::entity) for the panicking version.
     #[inline]
     #[track_caller]
-    pub fn get_entity<'a>(&'a mut self, entity: Entity) -> Option<EntityCommands<'w, 's, 'a>> {
+    pub fn get_entity<'a>(&'a mut self, entity: Entity) -> Option<EntityCommands<'w, 'a>> {
         self.entities.contains(entity).then_some(EntityCommands {
             entity,
             commands: self,
@@ -641,12 +642,12 @@ impl<C: EntityCommand> Command for WithEntity<C> {
 }
 
 /// A list of commands that will be run to modify an [entity](crate::entity).
-pub struct EntityCommands<'w, 's, 'a> {
+pub struct EntityCommands<'w, 'a> {
     entity: Entity,
-    commands: &'a mut Commands<'w, 's>,
+    commands: &'a mut Commands<'w>,
 }
 
-impl<'w, 's, 'a> EntityCommands<'w, 's, 'a> {
+impl<'w, 'a> EntityCommands<'w, 'a> {
     /// Returns the [`Entity`] id of the entity.
     ///
     /// # Example
@@ -832,7 +833,7 @@ impl<'w, 's, 'a> EntityCommands<'w, 's, 'a> {
     }
 
     /// Returns the underlying [`Commands`].
-    pub fn commands(&mut self) -> &mut Commands<'w, 's> {
+    pub fn commands(&mut self) -> &mut Commands<'w> {
         self.commands
     }
 }

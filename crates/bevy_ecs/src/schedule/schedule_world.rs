@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use crate as bevy_ecs;
 use crate::change_detection::{Mut, MutUntyped};
 use crate::component::{ComponentId, Tick};
@@ -81,6 +83,35 @@ where
     T: Component + Default,
 {
     data: &'a mut T,
+}
+
+impl<'a, T> ScheduleData<'a, T>
+where
+    T: Component + Default,
+{
+    pub fn new(data: &'a mut T) -> Self {
+        ScheduleData { data }
+    }
+}
+
+impl<'a, T> Deref for ScheduleData<'a, T>
+where
+    T: Component + Default,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<'a, T> DerefMut for ScheduleData<'a, T>
+where
+    T: Component + Default,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
 }
 
 pub struct ScheduleDataState {
