@@ -80,7 +80,7 @@ pub struct ScheduleData<'a, T>
 where
     T: Component + Default,
 {
-    data: Mut<'a, T>,
+    data: &'a mut T,
 }
 
 pub struct ScheduleDataState {
@@ -123,8 +123,10 @@ where
         let data = schedule_world
             .get_mut_by_id(system_meta.schedule_index.unwrap(), state.command_queue_id); // TODO: get the systems index from somewhere                                                              // let queue = queue2.as_mut();
 
+        // TODO: this will always trigger change detection. might be better to have a into_inner_bypass and
+        // reimplement change detection on ScheduleData
         ScheduleData {
-            data: data.with_type(),
+            data: data.with_type::<T>().into_inner(),
         }
     }
 }
