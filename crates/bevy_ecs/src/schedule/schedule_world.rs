@@ -13,7 +13,6 @@ use bevy_ecs_macros::Resource;
 #[derive(Resource)]
 pub struct ScheduleWorld {
     world: World,
-    num_systems: usize,
     system_map: Vec<Entity>,
 }
 
@@ -27,11 +26,7 @@ impl ScheduleWorld {
             system_map.push(world.spawn(()).id());
         }
 
-        ScheduleWorld {
-            world,
-            num_systems,
-            system_map,
-        }
+        ScheduleWorld { world, system_map }
     }
 
     pub fn new_schedule_data<T: Default + Component>(&mut self, system_index: usize) {
@@ -65,6 +60,12 @@ impl ScheduleWorld {
 
 #[derive(Component, Default)]
 pub struct ComponentCommandQueue(pub CommandQueue);
+
+impl SystemBufferV2 for ComponentCommandQueue {
+    fn apply(&mut self, world: &mut World) {
+        self.0.apply(world);
+    }
+}
 
 #[derive(SystemParam)]
 pub struct CommandsV2<'w> {
@@ -101,7 +102,7 @@ where
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.data
+        self.data
     }
 }
 
@@ -110,7 +111,7 @@ where
     T: Component + Default,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        self.data
     }
 }
 
@@ -162,21 +163,29 @@ where
     }
 }
 
-pub fn apply_commands(world: &mut World) {
+pub trait SystemBufferV2 {
+    fn apply(&mut self, world: &mut World);
+}
+
+pub fn apply_schedule_data<T>(world: &mut World)
+where
+    T: Component + SystemBufferV2,
+{
     world.resource_scope(|world, mut schedule_world: Mut<ScheduleWorld>| {
         // TODO: figure out a place to cache this data
-        let mut state = QueryState::<&mut ComponentCommandQueue>::new(schedule_world.world_mut());
+        let mut state = QueryState::<&mut T>::new(schedule_world.world_mut());
         for mut queue in state.iter_mut(schedule_world.world_mut()) {
-            queue.0.apply(world);
+            queue.apply(world);
         }
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_commands;
+    use super::apply_schedule_data;
     use crate as bevy_ecs;
     use crate::prelude::{Resource, World};
+    use crate::schedule::ComponentCommandQueue;
     use crate::schedule::{schedule_world::CommandsV2, IntoSystemConfigs, Schedule};
 
     #[test]
@@ -190,7 +199,14 @@ mod tests {
         fn do_some_commands(mut commands: CommandsV2) {
             commands.into_commands().insert_resource(TestResource);
         }
-        schedule.add_systems((do_some_commands, apply_commands).chain());
+
+        schedule.add_systems(
+            (
+                do_some_commands,
+                apply_schedule_data::<ComponentCommandQueue>,
+            )
+                .chain(),
+        );
 
         schedule.run(&mut world);
 
