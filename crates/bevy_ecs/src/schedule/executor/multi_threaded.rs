@@ -701,6 +701,9 @@ fn apply_deferred(
             return Err(payload);
         }
     }
+
+    apply_schedule_data::<CommandQueue>(world);
+
     Ok(())
 }
 

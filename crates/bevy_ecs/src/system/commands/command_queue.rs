@@ -4,6 +4,7 @@ use bevy_ptr::{OwningPtr, Unaligned};
 
 use super::Command;
 use crate as bevy_ecs;
+use crate::schedule::SystemBufferV2;
 use crate::{prelude::Component, world::World};
 
 struct CommandMeta {
@@ -36,6 +37,12 @@ unsafe impl Send for CommandQueue {}
 
 // SAFETY: `&CommandQueue` never gives access to the inner commands.
 unsafe impl Sync for CommandQueue {}
+
+impl SystemBufferV2 for CommandQueue {
+    fn apply(&mut self, world: &mut World) {
+        self.apply(world);
+    }
+}
 
 impl CommandQueue {
     /// Push a [`Command`] onto the queue.

@@ -240,8 +240,6 @@ impl Schedule {
         self.with_schedule_world(world, |world, schedule| {
             schedule.executor.run(&mut schedule.executable, world);
         });
-
-        self.schedule_world = world.remove_resource::<ScheduleWorld>();
     }
 
     /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
