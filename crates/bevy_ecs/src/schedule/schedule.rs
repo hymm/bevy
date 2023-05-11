@@ -19,7 +19,7 @@ use crate::{
     self as bevy_ecs,
     component::{ComponentId, Components, Tick},
     schedule::*,
-    system::{BoxedSystem, Resource, System},
+    system::{BoxedSystem, CommandQueue, Resource, System},
     world::World,
 };
 
@@ -247,9 +247,12 @@ impl Schedule {
     ///
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
-        if self.graph.changed {
-            self.schedule_world = Some(ScheduleWorld::new(self.graph.systems.len()));
+        if self.schedule_world.is_none() {
+            // TODO: this should maybe be reinitialized every time this function is called
+            self.schedule_world = Some(ScheduleWorld::new());
+        }
 
+        if self.graph.changed {
             self.with_schedule_world(world, |world, schedule| {
                 schedule.graph.initialize(world);
             });
@@ -314,6 +317,9 @@ impl Schedule {
         for system in &mut self.executable.systems {
             system.apply_deferred(world);
         }
+        self.with_schedule_world(world, |world, _schedule| {
+            apply_schedule_data::<CommandQueue>(world);
+        });
     }
 
     fn with_schedule_world<U>(

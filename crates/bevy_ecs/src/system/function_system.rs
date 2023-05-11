@@ -22,7 +22,6 @@ pub struct SystemMeta {
     // SystemParams from overriding each other
     is_send: bool,
     pub(crate) last_run: Tick,
-    pub(crate) schedule_index: Option<usize>,
 }
 
 impl SystemMeta {
@@ -33,7 +32,6 @@ impl SystemMeta {
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             last_run: Tick::new(0),
-            schedule_index: None,
         }
     }
 

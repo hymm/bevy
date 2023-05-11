@@ -5,6 +5,7 @@ use crate::{
     self as bevy_ecs,
     bundle::Bundle,
     entity::{Entities, Entity},
+    prelude::Component,
     schedule::ScheduleData,
     world::{FromWorld, World},
 };
@@ -14,7 +15,7 @@ pub use command_queue::CommandQueue;
 pub use parallel_scope::*;
 use std::marker::PhantomData;
 
-use super::{Resource, SystemBuffer, SystemMeta};
+use super::Resource;
 
 /// A [`World`] mutation.
 ///
@@ -109,21 +110,10 @@ pub trait Command: Send + 'static {
 /// [`System::apply_deferred`]: crate::system::System::apply_deferred
 /// [`apply_deferred`]: crate::schedule::apply_deferred
 /// [`Schedule::apply_deferred`]: crate::schedule::Schedule::apply_deferred
-#[derive(SystemParam)]
+#[derive(SystemParam, Component)]
 pub struct Commands<'w> {
     pub queue: ScheduleData<'w, CommandQueue>,
     entities: &'w Entities,
-}
-
-impl SystemBuffer for CommandQueue {
-    #[inline]
-    fn apply(&mut self, _system_meta: &SystemMeta, world: &mut World) {
-        #[cfg(feature = "trace")]
-        let _system_span =
-            bevy_utils::tracing::info_span!("system_commands", name = _system_meta.name())
-                .entered();
-        self.apply(world);
-    }
 }
 
 impl<'w> Commands<'w> {

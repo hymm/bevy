@@ -135,6 +135,7 @@ impl SingleThreadedExecutor {
         }
 
         self.unapplied_systems.clear();
+        apply_schedule_data::<CommandQueue>(world)
     }
 }
 

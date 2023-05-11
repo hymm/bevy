@@ -123,7 +123,7 @@ pub use query::*;
 pub use system::*;
 pub use system_param::*;
 
-use crate::{world::World, schedule::ScheduleWorld};
+use crate::world::World;
 
 /// Conversion trait to turn something into a [`System`].
 ///
