@@ -314,10 +314,10 @@ impl Schedule {
     /// This is used in rendering to extract data from the main world, storing the data in system buffers,
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
-        for system in &mut self.executable.systems {
+        self.with_schedule_world(world, |world, schedule| {
+            for system in &mut schedule.executable.systems {
             system.apply_deferred(world);
-        }
-        self.with_schedule_world(world, |world, _schedule| {
+            }
             apply_schedule_data::<CommandQueue>(world);
         });
     }

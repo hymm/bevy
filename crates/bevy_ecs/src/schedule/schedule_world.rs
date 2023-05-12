@@ -133,7 +133,11 @@ where
         let schedule_world: &mut ScheduleWorld = schedule_world.value.deref_mut();
 
         if schedule_world.world.id() != state.world_id {
-            panic!("world does not match what param was initialized with")
+            panic!(
+                "schedule world {:?} does not match what param was initialized with {:?}",
+                state.world_id,
+                schedule_world.world.id()
+            );
         }
 
         let data = schedule_world.get_mut_by_entity(state.entity, state.command_queue_id); // TODO: get the systems index from somewhere                                                              // let queue = queue2.as_mut();
@@ -143,6 +147,24 @@ where
         ScheduleData {
             data: data.with_type::<T>().into_inner(),
         }
+    }
+
+    // TODO: think about if the apply method should be removed from SystemParam.
+    fn apply(state: &mut Self::State, _system_meta: &SystemMeta, world: &mut World) {
+        world.resource_scope(|world, mut schedule_world: Mut<ScheduleWorld>| {
+            if schedule_world.world.id() != state.world_id {
+                panic!(
+                    "schedule world {:?} does not match what param was initialized with {:?}",
+                    state.world_id,
+                    schedule_world.world.id()
+                );
+            }
+
+            // TODO: could this be done unsafely for perf?
+            let mut data = schedule_world.world.get_mut::<T>(state.entity).unwrap();
+
+            data.apply(world);
+        });
     }
 }
 
