@@ -5,35 +5,59 @@ use crate::change_detection::{Mut, MutUntyped};
 use crate::component::{ComponentId, Tick};
 use crate::entity::Entity;
 use crate::prelude::{Component, QueryState};
-use crate::system::{CommandQueue, SystemMeta, SystemParam};
+use crate::system::{SystemMeta, SystemParam};
 use crate::world::unsafe_world_cell::UnsafeWorldCell;
 use crate::world::{World, WorldId};
+use async_channel::{Receiver, Sender};
 use bevy_ecs_macros::Resource;
 
 #[derive(Resource)]
 pub struct ScheduleWorld {
     world: World,
+    despawn_recv: Receiver<Entity>,
+    despawn_send: Sender<Entity>,
+}
+
+impl Default for ScheduleWorld {
+    fn default() -> ScheduleWorld {
+        let world = World::default();
+        let (despawn_send, despawn_recv) = async_channel::unbounded();
+
+        ScheduleWorld {
+            world,
+            despawn_send,
+            despawn_recv,
+        }
+    }
 }
 
 impl ScheduleWorld {
     pub fn new() -> Self {
-        let world = World::default();
-
-        ScheduleWorld { world }
+        Self::default()
     }
 
-    pub fn new_schedule_data<T: Default + Component + SystemBufferV2>(&mut self) -> Entity {
-        self.world.spawn(T::default()).id()
+    pub fn new_schedule_data<T: Default + Component + SystemBufferV2>(
+        &mut self,
+    ) -> ScheduleWorldEntity {
+        let entity = self.world.spawn(T::default()).id();
+        ScheduleWorldEntity {
+            entity,
+            despawn_send: self.despawn_send.clone(),
+        }
     }
 
     /// # Safety
     /// TODO: make this safete comment more exact
     /// Caller must ensure this is no simultaneous access to the same data
-    pub unsafe fn get_mut_by_entity(&self, entity: Entity, id: ComponentId) -> MutUntyped {
+    pub unsafe fn get_mut_by_entity(
+        &self,
+        entity: &ScheduleWorldEntity,
+        id: ComponentId,
+    ) -> MutUntyped {
         let entity_mut = self
             .world
             .as_unsafe_world_cell_migration_internal()
-            .get_entity(entity)
+            .get_entity(entity.entity)
             .unwrap();
         let data_mut = entity_mut.get_mut_by_id(id).unwrap();
         data_mut
@@ -42,14 +66,12 @@ impl ScheduleWorld {
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
     }
-}
 
-#[derive(Component, Default)]
-pub struct ComponentCommandQueue(pub CommandQueue);
-
-impl SystemBufferV2 for ComponentCommandQueue {
-    fn apply(&mut self, world: &mut World) {
-        self.0.apply(world);
+    // TODO: is there a despawn batch?
+    pub fn despawn_entities(&mut self) {
+        while let Ok(entity) = self.despawn_recv.recv_blocking() {
+            self.world.despawn(entity);
+        }
     }
 }
 
@@ -90,7 +112,7 @@ where
 }
 
 pub struct ScheduleDataState {
-    entity: Entity,
+    entity: ScheduleWorldEntity,
     schedule_data_id: ComponentId,
     command_queue_id: ComponentId,
     world_id: WorldId,
@@ -140,7 +162,7 @@ where
             );
         }
 
-        let data = schedule_world.get_mut_by_entity(state.entity, state.command_queue_id); // TODO: get the systems index from somewhere                                                              // let queue = queue2.as_mut();
+        let data = schedule_world.get_mut_by_entity(&state.entity, state.command_queue_id); // TODO: get the systems index from somewhere                                                              // let queue = queue2.as_mut();
 
         // TODO: this will always trigger change detection. might be better to have a into_inner_bypass and
         // reimplement change detection on ScheduleData
@@ -161,7 +183,10 @@ where
             }
 
             // TODO: could this be done unsafely for perf?
-            let mut data = schedule_world.world.get_mut::<T>(state.entity).unwrap();
+            let mut data = schedule_world
+                .world
+                .get_mut::<T>(state.entity.entity)
+                .unwrap();
 
             data.apply(world);
         });
@@ -183,6 +208,25 @@ where
             queue.apply(world);
         }
     });
+}
+
+pub struct ScheduleWorldEntity {
+    entity: Entity,
+    despawn_send: Sender<Entity>,
+}
+
+impl Deref for ScheduleWorldEntity {
+    type Target = Entity;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entity
+    }
+}
+
+impl Drop for ScheduleWorldEntity {
+    fn drop(&mut self) {
+        self.despawn_send.send_blocking(self.entity).unwrap();
+    }
 }
 
 #[cfg(test)]

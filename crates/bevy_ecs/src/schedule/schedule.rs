@@ -334,6 +334,9 @@ impl Schedule {
         let result = f(world, self);
 
         self.schedule_world = world.remove_resource::<ScheduleWorld>();
+        if let Some(ref mut schedule_world) = self.schedule_world {
+            schedule_world.despawn_entities();
+        }
         if let Some(old_schedule_world) = old_schedule_world {
             world.insert_resource(old_schedule_world);
         }
