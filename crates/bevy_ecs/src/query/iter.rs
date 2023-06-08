@@ -448,14 +448,9 @@ impl<'w, 's, Q: ReadOnlyWorldQuery, F: ReadOnlyWorldQuery, const K: usize> Fused
 struct QueryIterationCursor<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     table_id_iter: std::slice::Iter<'s, TableId>,
     archetype_id_iter: std::slice::Iter<'s, ArchetypeId>,
-    table_entities: &'w [Entity],
-    archetype_entities: &'w [ArchetypeEntity],
     fetch: Q::Fetch<'w>,
     filter: F::Fetch<'w>,
-    // length of the table table or length of the archetype, depending on whether both `Q`'s and `F`'s fetches are dense
-    current_len: usize,
-    // either table row or archetype index, depending on whether both `Q`'s and `F`'s fetches are dense
-    current_row: usize,
+    cached_iter: QuerySimpleIter<'w, 's, Q, F>,
     phantom: PhantomData<Q>,
 }
 
@@ -470,13 +465,21 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
         Self {
             table_id_iter: self.table_id_iter.clone(),
             archetype_id_iter: self.archetype_id_iter.clone(),
-            table_entities: self.table_entities,
-            archetype_entities: self.archetype_entities,
             // SAFETY: upheld by caller invariants
             fetch: Q::clone_fetch(&self.fetch),
             filter: F::clone_fetch(&self.filter),
-            current_len: self.current_len,
-            current_row: self.current_row,
+            cached_iter: QuerySimpleIter {
+                // SAFETY: upheld by caller invariants
+                fetch: Q::clone_fetch(&self.fetch),
+                filter: F::clone_fetch(&self.filter),
+                start_row: 0,
+                table_entities_iter: self.cached_iter.table_entities_iter.clone(),
+                archetype_entities_iter: self.cached_iter.archetype_entities_iter.clone(),
+                last_entity: Entity::PLACEHOLDER,
+                last_row: 0,
+                last_archetype_entity: None,
+                _phantom_data: PhantomData,
+            },
             phantom: PhantomData,
         }
     }
@@ -507,14 +510,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
         let fetch = Q::init_fetch(world, &query_state.fetch_state, last_run, this_run);
         let filter = F::init_fetch(world, &query_state.filter_state, last_run, this_run);
         QueryIterationCursor {
-            fetch,
-            filter,
-            table_entities: &[],
-            archetype_entities: &[],
+            fetch: Q::clone_fetch(&fetch),
+            filter: F::clone_fetch(&filter),
             table_id_iter: query_state.matched_table_ids.iter(),
             archetype_id_iter: query_state.matched_archetype_ids.iter(),
-            current_len: 0,
-            current_row: 0,
+            cached_iter: QuerySimpleIter::init_empty(fetch, filter),
             phantom: PhantomData,
         }
     }
@@ -522,22 +522,23 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
     /// retrieve item returned from most recent `next` call again.
     #[inline]
     unsafe fn peek_last(&mut self) -> Option<Q::Item<'w>> {
-        if self.current_row > 0 {
-            let index = self.current_row - 1;
-            if Self::IS_DENSE {
-                let entity = self.table_entities.get_unchecked(index);
-                Some(Q::fetch(&mut self.fetch, *entity, TableRow::new(index)))
-            } else {
-                let archetype_entity = self.archetype_entities.get_unchecked(index);
-                Some(Q::fetch(
-                    &mut self.fetch,
-                    archetype_entity.entity(),
-                    archetype_entity.table_row(),
-                ))
-            }
-        } else {
-            None
-        }
+        self.cached_iter.peek_last()
+        // if self.current_row > 0 {
+        //     let index = self.current_row - 1;
+        //     if Self::IS_DENSE {
+        //         let entity = self.table_entities.get_unchecked(index);
+        //         Some(Q::fetch(&mut self.fetch, *entity, TableRow::new(index)))
+        //     } else {
+        //         let archetype_entity = self.archetype_entities.get_unchecked(index);
+        //         Some(Q::fetch(
+        //             &mut self.fetch,
+        //             archetype_entity.entity(),
+        //             archetype_entity.table_row(),
+        //         ))
+        //     }
+        // } else {
+        //     None
+        // }
     }
 
     /// How many values will this cursor return at most?
@@ -552,7 +553,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
             let ids = self.archetype_id_iter.clone();
             ids.map(|id| archetypes[*id].len()).sum()
         };
-        remaining_matched + self.current_len - self.current_row
+        remaining_matched + self.cached_iter.size_hint().1.unwrap()
     }
 
     // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
@@ -570,39 +571,38 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
     ) -> Option<Q::Item<'w>> {
         if Self::IS_DENSE {
             loop {
+                let item = self.cached_iter.next();
                 // we are on the beginning of the query, or finished processing a table, so skip to the next
-                if self.current_row == self.current_len {
+                if item.is_none() {
                     let table_id = self.table_id_iter.next()?;
                     let table = tables.get(*table_id).debug_checked_unwrap();
                     // SAFETY: `table` is from the world that `fetch/filter` were created for,
                     // `fetch_state`/`filter_state` are the states that `fetch/filter` were initialized with
                     Q::set_table(&mut self.fetch, &query_state.fetch_state, table);
                     F::set_table(&mut self.filter, &query_state.filter_state, table);
-                    self.table_entities = table.entities();
-                    self.current_len = table.entity_count();
-                    self.current_row = 0;
+
+                    self.cached_iter = QuerySimpleIter {
+                        fetch: Q::clone_fetch(&self.fetch),
+                        filter: F::clone_fetch(&self.filter),
+                        start_row: 0,
+                        table_entities_iter: table.entities().iter().enumerate(),
+                        archetype_entities_iter: [].iter(), // unused in this branch
+                        last_entity: Entity::PLACEHOLDER,
+                        last_row: 0,
+                        last_archetype_entity: None,
+                        _phantom_data: PhantomData::default(),
+                    };
+
                     continue;
                 }
 
-                // SAFETY: set_table was called prior.
-                // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
-                let entity = self.table_entities.get_unchecked(self.current_row);
-                let row = TableRow::new(self.current_row);
-                if !F::filter_fetch(&mut self.filter, *entity, row) {
-                    self.current_row += 1;
-                    continue;
-                }
-
-                // SAFETY: set_table was called prior.
-                // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
-                let item = Q::fetch(&mut self.fetch, *entity, row);
-
-                self.current_row += 1;
-                return Some(item);
+                return item;
             }
         } else {
             loop {
-                if self.current_row == self.current_len {
+                let item = self.cached_iter.next();
+
+                if item.is_none() {
                     let archetype_id = self.archetype_id_iter.next()?;
                     let archetype = archetypes.get(*archetype_id).debug_checked_unwrap();
                     // SAFETY: `archetype` and `tables` are from the world that `fetch/filter` were created for,
@@ -615,33 +615,23 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryIterationCursor<'w, 's, 
                         archetype,
                         table,
                     );
-                    self.archetype_entities = archetype.entities();
-                    self.current_len = archetype.len();
-                    self.current_row = 0;
+
+                    self.cached_iter = QuerySimpleIter {
+                        fetch: Q::clone_fetch(&self.fetch),
+                        filter: F::clone_fetch(&self.filter),
+                        start_row: 0,
+                        table_entities_iter: [].iter().enumerate(),
+                        archetype_entities_iter: archetype.entities().iter(), // unused in this branch
+                        last_entity: Entity::PLACEHOLDER,
+                        last_row: 0,
+                        last_archetype_entity: None,
+                        _phantom_data: PhantomData::default(),
+                    };
+
                     continue;
                 }
 
-                // SAFETY: set_archetype was called prior.
-                // `current_row` is an archetype index row in range of the current archetype, because if it was not, then the if above would have been executed.
-                let archetype_entity = self.archetype_entities.get_unchecked(self.current_row);
-                if !F::filter_fetch(
-                    &mut self.filter,
-                    archetype_entity.entity(),
-                    archetype_entity.table_row(),
-                ) {
-                    self.current_row += 1;
-                    continue;
-                }
-
-                // SAFETY: set_archetype was called prior, `current_row` is an archetype index in range of the current archetype
-                // `current_row` is an archetype index row in range of the current archetype, because if it was not, then the if above would have been executed.
-                let item = Q::fetch(
-                    &mut self.fetch,
-                    archetype_entity.entity(),
-                    archetype_entity.table_row(),
-                );
-                self.current_row += 1;
-                return Some(item);
+                return item;
             }
         }
     }
@@ -733,6 +723,9 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     .iter()
                     .enumerate(),
                 archetype_entities_iter: [].iter(), // unused in this branch
+                last_entity: Entity::PLACEHOLDER,
+                last_row: 0,
+                last_archetype_entity: None,
                 _phantom_data: PhantomData::default(),
             });
         }
@@ -771,6 +764,9 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 archetype_entities_iter: entities
                     [self.start_row.min(length)..self.last_row.min(length)]
                     .iter(),
+                last_entity: Entity::PLACEHOLDER,
+                last_row: 0,
+                last_archetype_entity: None,
                 _phantom_data: PhantomData::default(),
             });
         }
@@ -778,12 +774,9 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         let cursor = QueryIterationCursor {
             table_id_iter: self.table_ids.iter(),
             archetype_id_iter: self.archetype_ids.iter(),
-            table_entities: &[],
-            archetype_entities: &[],
-            fetch,
-            filter,
-            current_len: 0,
-            current_row: 0,
+            fetch: Q::clone_fetch(&fetch),
+            filter: F::clone_fetch(&filter),
+            cached_iter: QuerySimpleIter::init_empty(fetch, filter),
             phantom: PhantomData::default(),
         };
 
@@ -1040,18 +1033,35 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for ProducerIter<'w,
     }
 }
 
-/// iterator over part of a single table or archetype
+/// iterator over part or whole of a single table or archetype
 pub struct QuerySimpleIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     fetch: Q::Fetch<'w>,
     filter: F::Fetch<'w>,
     start_row: usize,
     table_entities_iter: std::iter::Enumerate<std::slice::Iter<'w, Entity>>,
     archetype_entities_iter: std::slice::Iter<'w, ArchetypeEntity>,
+    last_entity: Entity,
+    last_row: usize,
+    last_archetype_entity: Option<ArchetypeEntity>,
     _phantom_data: PhantomData<&'s ()>,
 }
 
 impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F> {
     const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
+
+    pub fn init_empty(fetch: Q::Fetch<'w>, filter: F::Fetch<'w>) -> Self {
+        Self {
+            fetch,
+            filter,
+            start_row: 0,
+            table_entities_iter: [].iter().enumerate(),
+            archetype_entities_iter: [].iter(),
+            last_entity: Entity::PLACEHOLDER,
+            last_row: 0,
+            last_archetype_entity: None,
+            _phantom_data: PhantomData::default(),
+        }
+    }
 
     #[inline(always)]
     unsafe fn next(&mut self) -> Option<Q::Item<'w>> {
@@ -1065,6 +1075,8 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F>
                     continue;
                 }
 
+                self.last_entity = *entity;
+                self.last_row = index + self.start_row;
                 // SAFETY: set_table was called prior.
                 // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
                 return Some(Q::fetch(&mut self.fetch, *entity, row));
@@ -1089,10 +1101,38 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F>
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
+        // the minimum number of elements is zero since all entities
+        // could be filtered out
         if Self::IS_DENSE {
-            self.table_entities_iter.size_hint()
+            (0, self.table_entities_iter.size_hint().1)
         } else {
-            self.archetype_entities_iter.size_hint()
+            (0, self.archetype_entities_iter.size_hint().1)
+        }
+    }
+
+    // TODO: not dense branch won't work right as cannot set the archetype entity. should find a way
+    // for combinations iter to work around this somehow. instead of pushing resposibility onto simple iter
+    unsafe fn peek_last(&mut self) -> Option<Q::Item<'w>> {
+        if Self::IS_DENSE {
+            if self.last_entity != Entity::PLACEHOLDER {
+                Some(Q::fetch(
+                    &mut self.fetch,
+                    self.last_entity,
+                    TableRow::new(self.last_row),
+                ))
+            } else {
+                None
+            }
+        } else {
+            if let Some(ref entity) = self.last_archetype_entity {
+                Some(Q::fetch(
+                    &mut self.fetch,
+                    entity.entity(),
+                    entity.table_row(),
+                ))
+            } else {
+                None
+            }
         }
     }
 }
