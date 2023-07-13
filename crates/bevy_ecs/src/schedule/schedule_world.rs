@@ -54,11 +54,8 @@ impl ScheduleWorld {
         entity: &ScheduleWorldEntity,
         id: ComponentId,
     ) -> MutUntyped {
-        let entity_mut = self
-            .world
-            .as_unsafe_world_cell_migration_internal()
-            .get_entity(entity.entity)
-            .unwrap();
+        let world_cell = self.world.as_unsafe_world_cell();
+        let entity_mut = world_cell.get_entity(entity.entity).unwrap();
         let data_mut = entity_mut.get_mut_by_id(id).unwrap();
         data_mut
     }
@@ -152,7 +149,8 @@ where
         let schedule_world = world
             .get_resource_mut_by_id(state.schedule_data_id)
             .unwrap();
-        let schedule_world: &mut ScheduleWorld = schedule_world.value.deref_mut();
+        // this seems unsound as there will be 2 &mut's active when two different systems run
+        let schedule_world: &ScheduleWorld = schedule_world.value.as_ref().deref();
 
         if schedule_world.world.id() != state.world_id {
             panic!(
