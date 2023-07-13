@@ -297,7 +297,7 @@ impl<'w> Commands<'w> {
     /// - [`get_entity`](Self::get_entity) for the fallible version.
     #[inline]
     #[track_caller]
-    pub fn entity<'a>(&'a mut self, entity: Entity) -> EntityCommands<'w, 's, 'a> {
+    pub fn entity<'a>(&'a mut self, entity: Entity) -> EntityCommands<'w, 'a> {
         #[inline(never)]
         #[cold]
         #[track_caller]

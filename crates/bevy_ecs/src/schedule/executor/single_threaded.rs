@@ -4,7 +4,11 @@ use fixedbitset::FixedBitSet;
 use std::panic::AssertUnwindSafe;
 
 use crate::{
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
+    schedule::{
+        apply_schedule_data, is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor,
+        SystemSchedule,
+    },
+    system::CommandQueue,
     world::World,
 };
 

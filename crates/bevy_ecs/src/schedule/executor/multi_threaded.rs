@@ -17,8 +17,11 @@ use crate::{
     archetype::ArchetypeComponentId,
     prelude::Resource,
     query::Access,
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
-    system::BoxedSystem,
+    schedule::{
+        apply_schedule_data, is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor,
+        SystemSchedule,
+    },
+    system::{BoxedSystem, CommandQueue},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 

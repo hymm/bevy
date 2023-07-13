@@ -443,11 +443,6 @@ where
     }
 
     #[inline]
-    fn set_schedule_index(&mut self, index: usize) {
-        self.system_meta.schedule_index = Some(index);
-    }
-
-    #[inline]
     unsafe fn run_unsafe(&mut self, input: Self::In, world: UnsafeWorldCell) -> Self::Out {
         let change_tick = world.increment_change_tick();
 
