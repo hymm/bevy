@@ -1,4 +1,5 @@
 mod multi_threaded;
+mod multi_threaded_2;
 mod simple;
 mod single_threaded;
 
