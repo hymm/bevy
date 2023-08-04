@@ -4,6 +4,7 @@ mod simple;
 mod single_threaded;
 
 pub use self::multi_threaded::{MainThreadExecutor, MultiThreadedExecutor};
+pub use self::multi_threaded_2::{SystemResult, SystemTask};
 pub use self::simple::SimpleExecutor;
 pub use self::single_threaded::SingleThreadedExecutor;
 
@@ -18,7 +19,7 @@ use crate::{
 /// Types that can run a [`SystemSchedule`] on a [`World`].
 pub(super) trait SystemExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, schedule: &SystemSchedule);
+    fn init(&mut self, schedule: &mut SystemSchedule);
     fn run(&mut self, schedule: &mut SystemSchedule, world: &mut World);
     fn set_apply_final_deferred(&mut self, value: bool);
 }

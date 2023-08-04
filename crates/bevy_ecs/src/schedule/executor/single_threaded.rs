@@ -33,7 +33,7 @@ impl SystemExecutor for SingleThreadedExecutor {
         self.apply_final_deferred = apply_final_deferred;
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, schedule: &mut SystemSchedule) {
         // pre-allocate space
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();

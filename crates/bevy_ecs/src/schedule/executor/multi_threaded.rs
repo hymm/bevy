@@ -17,7 +17,10 @@ use crate::{
     archetype::ArchetypeComponentId,
     prelude::Resource,
     query::Access,
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
+    schedule::{
+        is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemResult,
+        SystemSchedule, SystemTask,
+    },
     system::BoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -64,12 +67,6 @@ struct SystemTaskMetadata {
     is_exclusive: bool,
 }
 
-/// The result of running a system that is sent across a channel.
-struct SystemResult {
-    system_index: usize,
-    success: bool,
-}
-
 /// Runs the schedule using a thread pool. Non-conflicting systems can run in parallel.
 pub struct MultiThreadedExecutor {
     /// Sends system completion events.
@@ -78,6 +75,8 @@ pub struct MultiThreadedExecutor {
     receiver: Receiver<SystemResult>,
     /// Metadata for scheduling and running system tasks.
     system_task_metadata: Vec<SystemTaskMetadata>,
+    /// Tasks to run systems
+    system_tasks: Vec<SystemTask>,
     /// Union of the accesses of all currently running systems.
     active_access: Access<ArchetypeComponentId>,
     /// Returns `true` if a system with non-`Send` access is running.
@@ -129,7 +128,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         self.apply_final_deferred = value;
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, schedule: &mut SystemSchedule) {
         // pre-allocate space
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
@@ -147,6 +146,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         self.unapplied_systems = FixedBitSet::with_capacity(sys_count);
 
         self.system_task_metadata = Vec::with_capacity(sys_count);
+        self.system_tasks = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
             self.system_task_metadata.push(SystemTaskMetadata {
                 archetype_component_access: default(),
@@ -154,6 +154,11 @@ impl SystemExecutor for MultiThreadedExecutor {
                 is_send: schedule.systems[index].is_send(),
                 is_exclusive: schedule.systems[index].is_exclusive(),
             });
+            self.system_tasks.push(SystemTask::new(
+                index,
+                schedule.systems[index].is_send(),
+                self.sender.clone(),
+            ));
         }
 
         self.num_dependencies_remaining = Vec::with_capacity(sys_count);
@@ -206,13 +211,13 @@ impl SystemExecutor for MultiThreadedExecutor {
                         if self.num_running_systems > 0 {
                             // wait for systems to complete
                             if let Ok(result) = self.receiver.recv().await {
-                                self.finish_system_and_handle_dependents(result);
+                                self.finish_system_and_handle_dependents(result, systems);
                             } else {
                                 panic!("Channel closed unexpectedly!");
                             }
 
                             while let Ok(result) = self.receiver.try_recv() {
-                                self.finish_system_and_handle_dependents(result);
+                                self.finish_system_and_handle_dependents(result, systems);
                             }
 
                             self.rebuild_active_access();
@@ -265,6 +270,7 @@ impl MultiThreadedExecutor {
             sender,
             receiver,
             system_task_metadata: Vec::new(),
+            system_tasks: Vec::new(),
             num_systems: 0,
             num_running_systems: 0,
             num_completed_systems: 0,
@@ -345,12 +351,22 @@ impl MultiThreadedExecutor {
                 break;
             }
 
-            // SAFETY:
-            // - No other reference to this system exists.
-            // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
-            // - `can_run` returned true, so no systems with conflicting world access are running.
-            unsafe {
-                self.spawn_system_task(scope, system_index, systems, world_cell);
+            if self.system_task_metadata[system_index].is_send {
+                // SAFETY:
+                // - No other reference to this system exists.
+                // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
+                // - `can_run` returned true, so no systems with conflicting world access are running.
+                unsafe {
+                    self.spawn_system_task(system_index, systems, world_cell);
+                }
+            } else {
+                // SAFETY:
+                // - No other reference to this system exists.
+                // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
+                // - `can_run` returned true, so no systems with conflicting world access are running.
+                unsafe {
+                    self.spawn_system_local_task(scope, system_index, systems, world_cell)
+                }
             }
         }
 
@@ -479,6 +495,33 @@ impl MultiThreadedExecutor {
     ///   on the system associated with `system_index`.
     unsafe fn spawn_system_task<'scope>(
         &mut self,
+        system_index: usize,
+        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
+        world: UnsafeWorldCell<'scope>,
+    ) {
+        // SAFETY: this system is not running, no other reference exists
+        let system = unsafe { &mut *systems[system_index].get() };
+
+        // SAFETY: we receive the system back later in the executor
+        self.system_tasks[system_index].run(world, system);
+
+        let system_meta = &self.system_task_metadata[system_index];
+        self.active_access
+            .extend(&system_meta.archetype_component_access);
+
+        if !system_meta.is_send {
+            self.local_thread_running = true;
+        }
+    }
+
+    /// # Safety
+    /// - Caller must not alias systems that are running.
+    /// - `world` must have permission to access the world data
+    ///   used by the specified system.
+    /// - `update_archetype_component_access` must have been called with `world`
+    ///   on the system associated with `system_index`.
+    unsafe fn spawn_system_local_task<'scope>(
+        &mut self,
         scope: &Scope<'_, 'scope, ()>,
         system_index: usize,
         systems: &'scope [SyncUnsafeCell<BoxedSystem>],
@@ -510,17 +553,10 @@ impl MultiThreadedExecutor {
             sender
                 .try_send(SystemResult {
                     system_index,
-                    success: res.is_ok(),
+                    system: None,
+                    result: res,
                 })
                 .unwrap_or_else(|error| unreachable!("{}", error));
-            if let Err(payload) = res {
-                eprintln!("Encountered a panic in system `{}`!", &*system.name());
-                // set the payload to propagate the error
-                {
-                    let mut panic_payload = panic_payload.lock().unwrap();
-                    *panic_payload = Some(payload);
-                }
-            }
         };
 
         #[cfg(feature = "trace")]
@@ -530,12 +566,8 @@ impl MultiThreadedExecutor {
         self.active_access
             .extend(&system_meta.archetype_component_access);
 
-        if system_meta.is_send {
-            scope.spawn(task);
-        } else {
-            self.local_thread_running = true;
-            scope.spawn_on_external(task);
-        }
+        self.local_thread_running = true;
+        scope.spawn_on_external(task);
     }
 
     /// # Safety
@@ -556,7 +588,6 @@ impl MultiThreadedExecutor {
         let system_span = info_span!("system", name = &*system.name());
 
         let sender = self.sender.clone();
-        let panic_payload = self.panic_payload.clone();
         if is_apply_deferred(system) {
             // TODO: avoid allocation
             let unapplied_systems = self.unapplied_systems.clone();
@@ -571,14 +602,10 @@ impl MultiThreadedExecutor {
                 sender
                     .try_send(SystemResult {
                         system_index,
-                        success: res.is_ok(),
+                        system: None,
+                        result: res,
                     })
                     .unwrap_or_else(|error| unreachable!("{}", error));
-                if let Err(payload) = res {
-                    // set the payload to propagate the error
-                    let mut panic_payload = panic_payload.lock().unwrap();
-                    *panic_payload = Some(payload);
-                }
             };
 
             #[cfg(feature = "trace")]
@@ -597,18 +624,10 @@ impl MultiThreadedExecutor {
                 sender
                     .try_send(SystemResult {
                         system_index,
-                        success: res.is_ok(),
+                        system: None,
+                        result: res,
                     })
                     .unwrap_or_else(|error| unreachable!("{}", error));
-                if let Err(payload) = res {
-                    eprintln!(
-                        "Encountered a panic in exclusive system `{}`!",
-                        &*system.name()
-                    );
-                    // set the payload to propagate the error
-                    let mut panic_payload = panic_payload.lock().unwrap();
-                    *panic_payload = Some(payload);
-                }
             };
 
             #[cfg(feature = "trace")]
@@ -620,10 +639,15 @@ impl MultiThreadedExecutor {
         self.local_thread_running = true;
     }
 
-    fn finish_system_and_handle_dependents(&mut self, result: SystemResult) {
+    fn finish_system_and_handle_dependents(
+        &mut self,
+        result: SystemResult,
+        systems: &[SyncUnsafeCell<BoxedSystem>],
+    ) {
         let SystemResult {
             system_index,
-            success,
+            system: received_system,
+            result,
         } = result;
 
         if self.system_task_metadata[system_index].is_exclusive {
@@ -632,6 +656,12 @@ impl MultiThreadedExecutor {
 
         if !self.system_task_metadata[system_index].is_send {
             self.local_thread_running = false;
+        }
+
+        if let Some(mut received_system) = received_system {
+            // SAFETY: this system is not running, no other reference exists
+            let system = unsafe { &mut *systems[system_index].get() };
+            std::mem::swap(system, &mut received_system);
         }
 
         debug_assert!(self.num_running_systems >= 1);
@@ -643,7 +673,7 @@ impl MultiThreadedExecutor {
 
         self.signal_dependents(system_index);
 
-        if !success {
+        if result.is_err() {
             self.stop_spawning_systems();
         }
     }

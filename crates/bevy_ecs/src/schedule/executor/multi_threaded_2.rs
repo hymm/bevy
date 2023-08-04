@@ -1,34 +1,38 @@
 use std::{any::Any, panic::AssertUnwindSafe};
 
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use bevy_tasks::{ComputeTaskPool, Task, TaskPool};
 
+use crate::system::IntoSystem;
 use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
-struct SystemTask {
-    system: Option<Box<dyn System<In = (), Out = ()>>>,
-    task: Task<()>,
-    send_start: Sender<(
-        UnsafeWorldCell<'static>,
-        &'static mut Box<dyn System<In = (), Out = ()>>,
-    )>,
-    recv_finish:
-        Receiver<Result<&'static mut Box<dyn System<In = (), Out = ()>>, Box<dyn Any + Send>>>,
+// TODO: add a drop impl to system task to not drop the task until the task is finished
+pub struct SystemTask {
+    // task is unused and is just used to store the task and drop it once SystemTask is dropped
+    _task: Task<()>,
+    send_start: Sender<(UnsafeWorldCell<'static>, Box<dyn System<In = (), Out = ()>>)>,
+}
+
+pub struct SystemResult {
+    pub system_index: usize,
+    pub system: Option<Box<dyn System<In = (), Out = ()>>>,
+    pub result: Result<(), Box<dyn Any + Send>>,
 }
 
 impl SystemTask {
-    pub fn new(system: Box<dyn System<In = (), Out = ()>>) -> SystemTask {
+    pub(crate) fn new(
+        index: usize,
+        is_send: bool,
+        send_finish: Sender<SystemResult>,
+    ) -> SystemTask {
         let (send_start, recv_start) = async_channel::bounded::<(
             UnsafeWorldCell<'static>,
-            &'static mut Box<dyn System<In = (), Out = ()>>,
+            Box<dyn System<In = (), Out = ()>>,
         )>(1);
-
-        // finish channel might need to be shared between all system tasks
-        let (send_finish, recv_finish) = async_channel::bounded(1);
 
         let system_future = async move {
             loop {
-                let Ok((world, system)) = recv_start.recv().await else { break; };
+                let Ok((world, mut system)) = recv_start.recv().await else { break; };
                 #[cfg(feature = "trace")]
                 let system_guard = system_span.enter();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -41,8 +45,13 @@ impl SystemTask {
                 #[cfg(feature = "trace")]
                 drop(system_guard);
                 // tell the executor that the system finished
+                let result = SystemResult {
+                    system_index: index,
+                    system: Some(system),
+                    result: res,
+                };
                 send_finish
-                    .send(res.map(|_| system))
+                    .send(result)
                     .await
                     .unwrap_or_else(|error| unreachable!("{}", error));
             }
@@ -53,13 +62,27 @@ impl SystemTask {
         #[cfg(feature = "trace")]
         let system_future = system_future.instrument(task_span);
 
-        let task = ComputeTaskPool::init(TaskPool::default).spawn(system_future);
+        let task = if is_send {
+            ComputeTaskPool::init(TaskPool::default).spawn(system_future)
+        } else {
+            // TODO: this actually needs to spawn on the main thread executor
+            ComputeTaskPool::init(TaskPool::default).spawn_local(system_future)
+        };
 
         SystemTask {
-            system: Some(system),
             send_start,
-            recv_finish,
-            task,
+            _task: task,
         }
+    }
+
+    /// SAFETY: must receive system back successfully before another use of system reference or using UnsafeWorldCell exclusively
+    pub unsafe fn run<'scope>(
+        &self,
+        world: UnsafeWorldCell<'_>,
+        system: &'scope mut Box<dyn System<In = (), Out = ()>>,
+    ) {
+        let world: UnsafeWorldCell<'static> = unsafe { std::mem::transmute(world) };
+        let system = std::mem::replace(system, Box::new(IntoSystem::into_system(|| {})));
+        self.send_start.try_send((world, system)).unwrap();
     }
 }

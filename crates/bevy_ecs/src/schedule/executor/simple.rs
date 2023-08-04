@@ -27,7 +27,7 @@ impl SystemExecutor for SimpleExecutor {
         // do nothing. simple executor does not do a final sync
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, schedule: &mut SystemSchedule) {
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
         self.evaluated_sets = FixedBitSet::with_capacity(set_count);

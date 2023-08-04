@@ -269,7 +269,7 @@ impl Schedule {
         }
 
         if !self.executor_initialized {
-            self.executor.init(&self.executable);
+            self.executor.init(&mut self.executable);
             self.executor_initialized = true;
         }
 
