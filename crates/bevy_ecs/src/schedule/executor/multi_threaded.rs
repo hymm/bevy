@@ -158,6 +158,7 @@ impl SystemExecutor for MultiThreadedExecutor {
                 index,
                 schedule.systems[index].is_send(),
                 self.sender.clone(),
+                schedule.systems[index].name().into(),
             ));
         }
 

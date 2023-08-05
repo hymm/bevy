@@ -6,6 +6,9 @@ use bevy_tasks::{ComputeTaskPool, Task, TaskPool};
 use crate::system::IntoSystem;
 use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
+#[cfg(feature = "trace")]
+use bevy_utils::tracing::{info_span, Instrument};
+
 // TODO: add a drop impl to system task to not drop the task until the task is finished
 pub struct SystemTask {
     // task is unused and is just used to store the task and drop it once SystemTask is dropped
@@ -20,15 +23,19 @@ pub struct SystemResult {
 }
 
 impl SystemTask {
-    pub(crate) fn new(
+    pub(crate) fn new<'a>(
         index: usize,
         is_send: bool,
         send_finish: Sender<SystemResult>,
+        _name: String,
     ) -> SystemTask {
         let (send_start, recv_start) = async_channel::bounded::<(
             UnsafeWorldCell<'static>,
             Box<dyn System<In = (), Out = ()>>,
         )>(1);
+
+        #[cfg(feature = "trace")]
+        let system_span = info_span!("system", name = &_name);
 
         let system_future = async move {
             loop {
@@ -58,7 +65,7 @@ impl SystemTask {
         };
 
         #[cfg(feature = "trace")]
-        let task_span = info_span!("system_task", name = &*system.name());
+        let task_span = info_span!("system_task", name = &_name);
         #[cfg(feature = "trace")]
         let system_future = system_future.instrument(task_span);
 
