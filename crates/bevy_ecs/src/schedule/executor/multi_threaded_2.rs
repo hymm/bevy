@@ -10,15 +10,20 @@ use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 use bevy_utils::tracing::{info_span, Instrument};
 
 // TODO: add a drop impl to system task to not drop the task until the task is finished
+/// Task that is reused for running systems
 pub struct SystemTask {
     // task is unused and is just used to store the task and drop it once SystemTask is dropped
     _task: Task<()>,
     send_start: Sender<(UnsafeWorldCell<'static>, Box<dyn System<In = (), Out = ()>>)>,
 }
 
+/// result from running a system
 pub struct SystemResult {
+    /// index of system in SystemSchedule
     pub system_index: usize,
+    /// returning system that should be put back in SystemSchdule to run the commands
     pub system: Option<Box<dyn System<In = (), Out = ()>>>,
+    /// Result from running system. Will contain an error if the system has panicked.
     pub result: Result<(), Box<dyn Any + Send>>,
 }
 
@@ -39,7 +44,9 @@ impl SystemTask {
 
         let system_future = async move {
             loop {
-                let Ok((world, mut system)) = recv_start.recv().await else { break; };
+                let Ok((world, mut system)) = recv_start.recv().await else {
+                    break;
+                };
                 #[cfg(feature = "trace")]
                 let system_guard = system_span.enter();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
