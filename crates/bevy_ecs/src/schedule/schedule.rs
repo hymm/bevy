@@ -290,7 +290,12 @@ impl Schedule {
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
-        for system in &mut self.executable.systems {
+        for system in self
+            .executable
+            .systems
+            .iter_mut()
+            .map(|s| s.as_mut().unwrap())
+        {
             if !is_apply_deferred(system) {
                 system.check_change_tick(change_tick);
             }
@@ -318,7 +323,12 @@ impl Schedule {
     /// This is used in rendering to extract data from the main world, storing the data in system buffers,
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
-        for system in &mut self.executable.systems {
+        for system in self
+            .executable
+            .systems
+            .iter_mut()
+            .map(|s| s.as_mut().unwrap())
+        {
             system.apply_deferred(world);
         }
     }
@@ -1209,7 +1219,7 @@ impl ScheduleGraph {
             .zip(schedule.systems.drain(..))
             .zip(schedule.system_conditions.drain(..))
         {
-            self.systems[id.index()].inner = Some(system);
+            self.systems[id.index()].inner = system;
             self.system_conditions[id.index()] = conditions;
         }
 
@@ -1227,7 +1237,7 @@ impl ScheduleGraph {
         for &id in &schedule.system_ids {
             let system = self.systems[id.index()].inner.take().unwrap();
             let conditions = std::mem::take(&mut self.system_conditions[id.index()]);
-            schedule.systems.push(system);
+            schedule.systems.push(Some(system));
             schedule.system_conditions.push(conditions);
         }
 

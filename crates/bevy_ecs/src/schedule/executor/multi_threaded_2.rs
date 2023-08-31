@@ -3,7 +3,6 @@ use std::{any::Any, panic::AssertUnwindSafe};
 use async_channel::Sender;
 use bevy_tasks::{ComputeTaskPool, Task, TaskPool};
 
-use crate::system::IntoSystem;
 use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
 #[cfg(feature = "trace")]
@@ -93,10 +92,10 @@ impl SystemTask {
     pub unsafe fn run<'scope>(
         &self,
         world: UnsafeWorldCell<'_>,
-        system: &'scope mut Box<dyn System<In = (), Out = ()>>,
+        system: &'scope mut Option<Box<dyn System<In = (), Out = ()>>>,
     ) {
         let world: UnsafeWorldCell<'static> = unsafe { std::mem::transmute(world) };
-        let system = std::mem::replace(system, Box::new(IntoSystem::into_system(|| {})));
+        let system = system.take().unwrap();
         self.send_start.try_send((world, system)).unwrap();
     }
 }

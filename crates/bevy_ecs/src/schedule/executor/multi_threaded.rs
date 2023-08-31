@@ -29,7 +29,7 @@ use crate as bevy_ecs;
 
 /// A funky borrow split of [`SystemSchedule`] required by the [`MultiThreadedExecutor`].
 struct SyncUnsafeSchedule<'a> {
-    systems: &'a [SyncUnsafeCell<BoxedSystem>],
+    systems: &'a [SyncUnsafeCell<Option<BoxedSystem>>],
     conditions: Conditions<'a>,
 }
 
@@ -147,18 +147,23 @@ impl SystemExecutor for MultiThreadedExecutor {
 
         self.system_task_metadata = Vec::with_capacity(sys_count);
         self.system_tasks = Vec::with_capacity(sys_count);
-        for index in 0..sys_count {
+        for (index, system) in schedule
+            .systems
+            .iter()
+            .map(|s| s.as_ref().unwrap())
+            .enumerate()
+        {
             self.system_task_metadata.push(SystemTaskMetadata {
                 archetype_component_access: default(),
                 dependents: schedule.system_dependents[index].clone(),
-                is_send: schedule.systems[index].is_send(),
-                is_exclusive: schedule.systems[index].is_exclusive(),
+                is_send: system.is_send(),
+                is_exclusive: system.is_exclusive(),
             });
             self.system_tasks.push(SystemTask::new(
                 index,
-                schedule.systems[index].is_send(),
+                system.is_send(),
                 self.sender.clone(),
-                schedule.systems[index].name().into(),
+                system.name().into(),
             ));
         }
 
@@ -300,7 +305,7 @@ impl MultiThreadedExecutor {
     unsafe fn spawn_system_tasks<'scope>(
         &mut self,
         scope: &Scope<'_, 'scope, ()>,
-        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
+        systems: &'scope [SyncUnsafeCell<Option<BoxedSystem>>],
         conditions: &mut Conditions,
         world_cell: UnsafeWorldCell<'scope>,
     ) {
@@ -319,7 +324,12 @@ impl MultiThreadedExecutor {
             // Therefore, no other reference to this system exists and there is no aliasing.
             let system = unsafe { &mut *systems[system_index].get() };
 
-            if !self.can_run(system_index, system, conditions, world_cell) {
+            if !self.can_run(
+                system_index,
+                system.as_mut().unwrap(),
+                conditions,
+                world_cell,
+            ) {
                 // NOTE: exclusive systems with ambiguities are susceptible to
                 // being significantly displaced here (compared to single-threaded order)
                 // if systems after them in topological order can run
@@ -332,7 +342,12 @@ impl MultiThreadedExecutor {
             // SAFETY: `can_run` returned true, which means that:
             // - It must have called `update_archetype_component_access` for each run condition.
             // - There can be no systems running whose accesses would conflict with any conditions.
-            if !self.should_run(system_index, system, conditions, world_cell) {
+            if !self.should_run(
+                system_index,
+                system.as_mut().unwrap(),
+                conditions,
+                world_cell,
+            ) {
                 self.skip_system_and_signal_dependents(system_index);
                 continue;
             }
@@ -365,9 +380,7 @@ impl MultiThreadedExecutor {
                 // - No other reference to this system exists.
                 // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
                 // - `can_run` returned true, so no systems with conflicting world access are running.
-                unsafe {
-                    self.spawn_system_local_task(scope, system_index, systems, world_cell)
-                }
+                unsafe { self.spawn_system_local_task(scope, system_index, systems, world_cell) }
             }
         }
 
@@ -497,7 +510,7 @@ impl MultiThreadedExecutor {
     unsafe fn spawn_system_task<'scope>(
         &mut self,
         system_index: usize,
-        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
+        systems: &'scope [SyncUnsafeCell<Option<BoxedSystem>>],
         world: UnsafeWorldCell<'scope>,
     ) {
         // SAFETY: this system is not running, no other reference exists
@@ -525,11 +538,12 @@ impl MultiThreadedExecutor {
         &mut self,
         scope: &Scope<'_, 'scope, ()>,
         system_index: usize,
-        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
+        systems: &'scope [SyncUnsafeCell<Option<BoxedSystem>>],
         world: UnsafeWorldCell<'scope>,
     ) {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *systems[system_index].get() };
+        let system = system.as_mut().unwrap();
 
         #[cfg(feature = "trace")]
         let task_span = info_span!("system_task", name = &*system.name());
@@ -537,7 +551,6 @@ impl MultiThreadedExecutor {
         let system_span = info_span!("system", name = &*system.name());
 
         let sender = self.sender.clone();
-        let panic_payload = self.panic_payload.clone();
         let task = async move {
             #[cfg(feature = "trace")]
             let system_guard = system_span.enter();
@@ -577,11 +590,12 @@ impl MultiThreadedExecutor {
         &mut self,
         scope: &Scope<'_, 'scope, ()>,
         system_index: usize,
-        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
+        systems: &'scope [SyncUnsafeCell<Option<BoxedSystem>>],
         world: &'scope mut World,
     ) {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *systems[system_index].get() };
+        let system = system.as_mut().unwrap();
 
         #[cfg(feature = "trace")]
         let task_span = info_span!("system_task", name = &*system.name());
@@ -589,7 +603,7 @@ impl MultiThreadedExecutor {
         let system_span = info_span!("system", name = &*system.name());
 
         let sender = self.sender.clone();
-        if is_apply_deferred(system) {
+        if is_apply_deferred(&system) {
             // TODO: avoid allocation
             let unapplied_systems = self.unapplied_systems.clone();
             self.unapplied_systems.clear();
@@ -643,7 +657,7 @@ impl MultiThreadedExecutor {
     fn finish_system_and_handle_dependents(
         &mut self,
         result: SystemResult,
-        systems: &[SyncUnsafeCell<BoxedSystem>],
+        systems: &[SyncUnsafeCell<Option<BoxedSystem>>],
     ) {
         let SystemResult {
             system_index,
@@ -659,10 +673,9 @@ impl MultiThreadedExecutor {
             self.local_thread_running = false;
         }
 
-        if let Some(mut received_system) = received_system {
+        if let Some(received_system) = received_system {
             // SAFETY: this system is not running, no other reference exists
-            let system = unsafe { &mut *systems[system_index].get() };
-            std::mem::swap(system, &mut received_system);
+            *unsafe { &mut *systems[system_index].get() } = Some(received_system);
         }
 
         debug_assert!(self.num_running_systems >= 1);
@@ -715,12 +728,13 @@ impl MultiThreadedExecutor {
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<BoxedSystem>],
+    systems: &[SyncUnsafeCell<Option<BoxedSystem>>],
     world: &mut World,
 ) -> Result<(), Box<dyn std::any::Any + Send>> {
     for system_index in unapplied_systems.ones() {
         // SAFETY: none of these systems are running, no other references exist
         let system = unsafe { &mut *systems[system_index].get() };
+        let system = system.as_mut().unwrap();
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
             system.apply_deferred(world);
         }));

@@ -37,7 +37,7 @@ impl SystemExecutor for SimpleExecutor {
     fn run(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in 0..schedule.systems.len() {
             #[cfg(feature = "trace")]
-            let name = schedule.systems[system_index].name();
+            let name = schedule.systems[system_index].as_mut().unwrap().name();
             #[cfg(feature = "trace")]
             let should_run_span = info_span!("check_conditions", name = &*name).entered();
 
@@ -76,7 +76,7 @@ impl SystemExecutor for SimpleExecutor {
                 continue;
             }
 
-            let system = &mut schedule.systems[system_index];
+            let system = schedule.systems[system_index].as_mut().unwrap();
             #[cfg(feature = "trace")]
             let system_span = info_span!("system", name = &*name).entered();
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
