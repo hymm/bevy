@@ -1540,7 +1540,7 @@ impl ScheduleGraph {
             return Ok(());
         }
 
-        match self.settings.ambiguity_detection {
+        match self.settings.ambiguity_detection.clone() {
             AmbiguityDetection::Ignore => Ok(()),
             AmbiguityDetection::Warn => {
                 let message = self.get_conflicts_error_message(conflicts, components);
@@ -1567,13 +1567,14 @@ impl ScheduleGraph {
     ) -> Result<(), ScheduleBuildError> {
         for (a, b, _) in conflicts {
             // a and b cannot be equal
-            match (a.index() < b.index(), resolve_by) {
+            match (a.index() < b.index(), resolve_by.clone()) {
                 (true, ResolveBy::InsertionOrder) | (false, ResolveBy::ReverseInsertionOrder) => {
                     dependency_flattened_dag.graph.add_edge(*a, *b, ());
                 }
                 (false, ResolveBy::InsertionOrder) | (true, ResolveBy::ReverseInsertionOrder) => {
                     dependency_flattened_dag.graph.add_edge(*b, *a, ());
                 }
+                (_, ResolveBy::WriteBeforeRead(_tiebreaker)) => todo!()
             }
         }
 
@@ -1707,7 +1708,7 @@ pub enum LogLevel {
 }
 
 /// Specifies how schedule construction should respond to ambiguities in the schedule.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AmbiguityDetection {
     /// Occurrences are completely ignored.
     Ignore,
@@ -1720,7 +1721,7 @@ pub enum AmbiguityDetection {
 }
 
 /// When [`AmbiguityDetection::Resolve`] is chosen, this specifies the resolution method
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResolveBy {
     /// systems that are added to the schedule earlier are run first
     InsertionOrder,
@@ -1729,6 +1730,11 @@ pub enum ResolveBy {
     /// Usually you should use `InsertionOrder`, but if you suspect bugs from
     /// ordering ambiguities. Using this option may help diagnose things.
     ReverseInsertionOrder,
+    /// Systems that write a value are placed before read. The inner value is what
+    /// to do when the ambiguity can't be resolved in this manner.
+    /// 
+    /// `WriteBeforeRead(Resolve(WriteBeforeRead))` is not allowed and will panic.
+    WriteBeforeRead(Box<AmbiguityDetection>)
 }
 
 /// Specifies miscellaneous settings for schedule construction.
