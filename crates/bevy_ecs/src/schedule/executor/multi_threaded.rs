@@ -6,8 +6,6 @@ use std::{
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
 use bevy_utils::default;
 use bevy_utils::syncunsafecell::SyncUnsafeCell;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::{info_span, Instrument, Span};
 use std::panic::AssertUnwindSafe;
 
 use async_channel::{Receiver, Sender};
@@ -62,9 +60,6 @@ struct SystemTaskMetadata {
     is_send: bool,
     /// Is `true` if the system is exclusive.
     is_exclusive: bool,
-    /// Cached tracing span for system task
-    #[cfg(feature = "trace")]
-    system_task_span: Span,
 }
 
 /// The result of running a system that is sent across a channel.
@@ -156,11 +151,6 @@ impl SystemExecutor for MultiThreadedExecutor {
                 dependents: schedule.system_dependents[index].clone(),
                 is_send: schedule.systems[index].is_send(),
                 is_exclusive: schedule.systems[index].is_exclusive(),
-                #[cfg(feature = "trace")]
-                system_task_span: info_span!(
-                    "system_task",
-                    name = &*schedule.systems[index].name()
-                ),
             });
         }
 
@@ -227,11 +217,6 @@ impl SystemExecutor for MultiThreadedExecutor {
                         }
                     }
                 };
-
-                #[cfg(feature = "trace")]
-                let executor_span = info_span!("multithreaded executor");
-                #[cfg(feature = "trace")]
-                let executor = executor.instrument(executor_span);
                 scope.spawn(executor);
             },
         );
@@ -521,13 +506,6 @@ impl MultiThreadedExecutor {
             }
         };
 
-        #[cfg(feature = "trace")]
-        let task = task.instrument(
-            self.system_task_metadata[system_index]
-                .system_task_span
-                .clone(),
-        );
-
         let system_meta = &self.system_task_metadata[system_index];
         self.active_access
             .extend(&system_meta.archetype_component_access);
@@ -574,12 +552,6 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(
-                self.system_task_metadata[system_index]
-                    .system_task_span
-                    .clone(),
-            );
             scope.spawn_on_scope(task);
         } else {
             let task = async move {
@@ -604,12 +576,6 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(
-                self.system_task_metadata[system_index]
-                    .system_task_span
-                    .clone(),
-            );
             scope.spawn_on_scope(task);
         }
 

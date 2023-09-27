@@ -1782,8 +1782,6 @@ impl World {
             ref mut non_send_resources,
         } = self.storages;
 
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("check component ticks").entered();
         tables.check_change_ticks(change_tick);
         sparse_sets.check_change_ticks(change_tick);
         resources.check_change_ticks(change_tick);
