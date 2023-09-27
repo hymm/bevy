@@ -333,7 +333,7 @@ impl MultiThreadedExecutor {
                 // SAFETY: `can_run` returned true for this system,
                 // which means no systems are currently borrowed.
                 unsafe {
-                    self.spawn_exclusive_system_task(scope, system_index, systems, world);
+                    self.run_exclusive_system_task(scope, system_index, systems, world);
                 }
                 break;
             }
@@ -520,9 +520,9 @@ impl MultiThreadedExecutor {
 
     /// # Safety
     /// Caller must ensure no systems are currently borrowed.
-    unsafe fn spawn_exclusive_system_task<'scope>(
+    unsafe fn run_exclusive_system_task<'scope>(
         &mut self,
-        scope: &Scope<'_, 'scope, ()>,
+        _scope: &Scope<'_, 'scope, ()>,
         system_index: usize,
         systems: &'scope [SyncUnsafeCell<BoxedSystem>],
         world: &'scope mut World,
@@ -530,57 +530,19 @@ impl MultiThreadedExecutor {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *systems[system_index].get() };
 
-        let sender = self.sender.clone();
-        let panic_payload = self.panic_payload.clone();
         if is_apply_deferred(system) {
             // TODO: avoid allocation
             let unapplied_systems = self.unapplied_systems.clone();
             self.unapplied_systems.clear();
-            let task = async move {
-                let res = apply_deferred(&unapplied_systems, systems, world);
-                // tell the executor that the system finished
-                sender
-                    .try_send(SystemResult {
-                        system_index,
-                        success: res.is_ok(),
-                    })
-                    .unwrap_or_else(|error| unreachable!("{}", error));
-                if let Err(payload) = res {
-                    // set the payload to propagate the error
-                    let mut panic_payload = panic_payload.lock().unwrap();
-                    *panic_payload = Some(payload);
-                }
-            };
-
-            scope.spawn_on_scope(task);
+            apply_deferred(&unapplied_systems, systems, world).unwrap();
         } else {
-            let task = async move {
-                let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    system.run((), world);
-                }));
-                // tell the executor that the system finished
-                sender
-                    .try_send(SystemResult {
-                        system_index,
-                        success: res.is_ok(),
-                    })
-                    .unwrap_or_else(|error| unreachable!("{}", error));
-                if let Err(payload) = res {
-                    eprintln!(
-                        "Encountered a panic in exclusive system `{}`!",
-                        &*system.name()
-                    );
-                    // set the payload to propagate the error
-                    let mut panic_payload = panic_payload.lock().unwrap();
-                    *panic_payload = Some(payload);
-                }
-            };
-
-            scope.spawn_on_scope(task);
+            system.run((), world);
         }
 
-        self.exclusive_running = true;
-        self.local_thread_running = true;
+        self.finish_system_and_handle_dependents(SystemResult {
+            system_index,
+            success: true,
+        });
     }
 
     fn finish_system_and_handle_dependents(&mut self, result: SystemResult) {

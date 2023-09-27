@@ -33,12 +33,12 @@ pub enum ExecutorKind {
     ///
     /// Useful if you're dealing with a single-threaded environment, saving your threads for
     /// other things, or just trying minimize overhead.
-    #[default]
     SingleThreaded,
     /// Like [`SingleThreaded`](ExecutorKind::SingleThreaded) but calls [`apply_deferred`](crate::system::System::apply_deferred)
     /// immediately after running each system.
     Simple,
     /// Runs the schedule using a thread pool. Non-conflicting systems can run in parallel.
+    #[default]
     MultiThreaded,
 }
 
