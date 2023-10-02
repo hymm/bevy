@@ -111,7 +111,7 @@ pub struct TaskPool {
     /// This has to be separate from TaskPoolInner because we have to create an `Arc<Executor>` to
     /// pass into the worker threads, and we must create the worker threads before we can create
     /// the `Vec<Task<T>>` contained within `TaskPoolInner`
-    executor: Arc<async_executor::Executor<'static>>,
+    executor: Arc<smolscale::Executor<'static>>,
 
     /// Inner state of the pool
     threads: Vec<JoinHandle<()>>,
@@ -137,7 +137,7 @@ impl TaskPool {
     fn new_internal(builder: TaskPoolBuilder) -> Self {
         let (shutdown_tx, shutdown_rx) = async_channel::unbounded::<()>();
 
-        let executor = Arc::new(async_executor::Executor::new());
+        let executor = Arc::new(smolscale::Executor::new());
 
         let num_threads = builder
             .num_threads
@@ -172,12 +172,12 @@ impl TaskPool {
                             let _destructor = CallOnDrop(on_thread_destroy);
                             loop {
                                 let res = std::panic::catch_unwind(|| {
-                                    let tick_forever = async move {
+                                    let tick_forever = async {
                                         loop {
-                                            local_executor.tick().await;
+                                            AssertUnwindSafe(ex.run_local_queue()).or(local_executor.tick()).await;
                                         }
                                     };
-                                    block_on(ex.run(tick_forever.or(shutdown_rx.recv())))
+                                    block_on(tick_forever.or(shutdown_rx.recv()))
                                 });
                                 if let Ok(value) = res {
                                     // Use unwrap_err because we expect a Closed error
@@ -352,8 +352,8 @@ impl TaskPool {
         // transmute the lifetimes to 'env here to appease the compiler as it is unable to validate safety.
         // Any usages of the references passed into `Scope` must be accessed through
         // the transmuted reference for the rest of this function.
-        let executor: &async_executor::Executor = &self.executor;
-        let executor: &'env async_executor::Executor = unsafe { mem::transmute(executor) };
+        let executor: &smolscale::Executor = &self.executor;
+        let executor: &'env smolscale::Executor = unsafe { mem::transmute(executor) };
         let external_executor: &'env ThreadExecutor<'env> =
             unsafe { mem::transmute(external_executor) };
         let scope_executor: &'env ThreadExecutor<'env> = unsafe { mem::transmute(scope_executor) };
@@ -434,7 +434,7 @@ impl TaskPool {
 
     #[inline]
     async fn execute_global_external_scope<'scope, 'ticker, T>(
-        executor: &'scope async_executor::Executor<'scope>,
+        executor: &'scope smolscale::Executor<'scope>,
         external_ticker: ThreadExecutorTicker<'scope, 'ticker>,
         scope_ticker: ThreadExecutorTicker<'scope, 'ticker>,
         get_results: impl Future<Output = Vec<T>>,
@@ -450,7 +450,7 @@ impl TaskPool {
                 };
                 // we don't care if it errors. If a scoped task errors it will propagate
                 // to get_results
-                let _result = AssertUnwindSafe(executor.run(tick_forever))
+                let _result = AssertUnwindSafe(executor.run_local_queue().or(tick_forever))
                     .catch_unwind()
                     .await
                     .is_ok();
@@ -480,7 +480,7 @@ impl TaskPool {
 
     #[inline]
     async fn execute_global_scope<'scope, 'ticker, T>(
-        executor: &'scope async_executor::Executor<'scope>,
+        executor: &'scope smolscale::Executor<'scope>,
         scope_ticker: ThreadExecutorTicker<'scope, 'ticker>,
         get_results: impl Future<Output = Vec<T>>,
     ) -> Vec<T> {
@@ -491,7 +491,7 @@ impl TaskPool {
                         scope_ticker.tick().await;
                     }
                 };
-                let _result = AssertUnwindSafe(executor.run(tick_forever))
+                let _result = AssertUnwindSafe(executor.run_local_queue().or(tick_forever))
                     .catch_unwind()
                     .await
                     .is_ok();
@@ -595,7 +595,7 @@ impl Drop for TaskPool {
 /// For more information, see [`TaskPool::scope`].
 #[derive(Debug)]
 pub struct Scope<'scope, 'env: 'scope, T> {
-    executor: &'scope async_executor::Executor<'scope>,
+    executor: &'scope smolscale::Executor<'scope>,
     external_executor: &'scope ThreadExecutor<'scope>,
     scope_executor: &'scope ThreadExecutor<'scope>,
     spawned: &'scope ConcurrentQueue<FallibleTask<Result<T, Box<(dyn std::any::Any + Send)>>>>,
