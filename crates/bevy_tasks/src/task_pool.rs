@@ -111,7 +111,7 @@ pub struct TaskPool {
     /// This has to be separate from TaskPoolInner because we have to create an `Arc<Executor>` to
     /// pass into the worker threads, and we must create the worker threads before we can create
     /// the `Vec<Task<T>>` contained within `TaskPoolInner`
-    executor: Arc<smolscale::Executor<'static>>,
+    executor: smolscale::Executor<'static>,
 
     /// Inner state of the pool
     threads: Vec<JoinHandle<()>>,
@@ -137,15 +137,22 @@ impl TaskPool {
     fn new_internal(builder: TaskPoolBuilder) -> Self {
         let (shutdown_tx, shutdown_rx) = async_channel::unbounded::<()>();
 
-        let executor = Arc::new(smolscale::Executor::new());
+        let executor = smolscale::Executor::new();
 
         let num_threads = builder
             .num_threads
             .unwrap_or_else(crate::available_parallelism);
 
+        if num_threads > 1 {
+            let ex = executor.clone();
+            std::thread::spawn(move || {
+                ex.global_rebalance();
+            });
+        }
+
         let threads = (0..num_threads)
             .map(|i| {
-                let ex = Arc::clone(&executor);
+                let ex = executor.clone();
                 let shutdown_rx = shutdown_rx.clone();
 
                 let thread_name = if let Some(thread_name) = builder.thread_name.as_deref() {
