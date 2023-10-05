@@ -465,8 +465,8 @@ where
 
     #[inline]
     unsafe fn run_unsafe(&mut self, input: Self::In, world: UnsafeWorldCell) -> Self::Out {
-        #[cfg(feature = "trace")]
-        let _span_guard = self.system_meta.system_span.enter();
+        // #[cfg(feature = "trace")]
+        // let _span_guard = self.system_meta.system_span.enter();
 
         let change_tick = world.increment_change_tick();
 

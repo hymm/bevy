@@ -44,10 +44,10 @@ impl SystemExecutor for SingleThreadedExecutor {
 
     fn run(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in 0..schedule.systems.len() {
-            #[cfg(feature = "trace")]
-            let name = schedule.systems[system_index].name();
-            #[cfg(feature = "trace")]
-            let should_run_span = info_span!("check_conditions", name = &*name).entered();
+            // #[cfg(feature = "trace")]
+            // let name = schedule.systems[system_index].name();
+            // #[cfg(feature = "trace")]
+            // let should_run_span = info_span!("check_conditions", name = &*name).entered();
 
             let mut should_run = !self.completed_systems.contains(system_index);
             for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
@@ -74,8 +74,8 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             should_run &= system_conditions_met;
 
-            #[cfg(feature = "trace")]
-            should_run_span.exit();
+            // #[cfg(feature = "trace")]
+            // should_run_span.exit();
 
             // system has either been skipped or will run
             self.completed_systems.insert(system_index);

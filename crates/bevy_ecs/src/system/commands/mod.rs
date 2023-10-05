@@ -118,8 +118,8 @@ pub struct Commands<'w, 's> {
 impl SystemBuffer for CommandQueue {
     #[inline]
     fn apply(&mut self, _system_meta: &SystemMeta, world: &mut World) {
-        #[cfg(feature = "trace")]
-        let _span_guard = _system_meta.commands_span.enter();
+        // #[cfg(feature = "trace")]
+        // let _span_guard = _system_meta.commands_span.enter();
         self.apply(world);
     }
 }

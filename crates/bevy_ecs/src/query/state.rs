@@ -1214,8 +1214,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                         let func = func.clone();
                         let len = batch_size.min(table.entity_count() - offset);
                         scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
+                            // #[cfg(feature = "trace")]
+                            // let _span = self.par_iter_span.enter();
                             let mut fetch =
                                 Q::init_fetch(world, &self.fetch_state, last_run, this_run);
                             let mut filter =
@@ -1250,8 +1250,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                         let func = func.clone();
                         let len = batch_size.min(archetype.len() - offset);
                         scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
+                            // #[cfg(feature = "trace")]
+                            // let _span = self.par_iter_span.enter();
                             let mut fetch =
                                 Q::init_fetch(world, &self.fetch_state, last_run, this_run);
                             let mut filter =

@@ -228,10 +228,10 @@ impl SystemExecutor for MultiThreadedExecutor {
                     }
                 };
 
-                #[cfg(feature = "trace")]
-                let executor_span = info_span!("multithreaded executor");
-                #[cfg(feature = "trace")]
-                let executor = executor.instrument(executor_span);
+                // #[cfg(feature = "trace")]
+                // let executor_span = info_span!("multithreaded executor");
+                // #[cfg(feature = "trace")]
+                // let executor = executor.instrument(executor_span);
                 scope.spawn(executor);
             },
         );
@@ -521,12 +521,12 @@ impl MultiThreadedExecutor {
             }
         };
 
-        #[cfg(feature = "trace")]
-        let task = task.instrument(
-            self.system_task_metadata[system_index]
-                .system_task_span
-                .clone(),
-        );
+        // #[cfg(feature = "trace")]
+        // let task = task.instrument(
+        //     self.system_task_metadata[system_index]
+        //         .system_task_span
+        //         .clone(),
+        // );
 
         let system_meta = &self.system_task_metadata[system_index];
         self.active_access
@@ -574,12 +574,12 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(
-                self.system_task_metadata[system_index]
-                    .system_task_span
-                    .clone(),
-            );
+            // #[cfg(feature = "trace")]
+            // let task = task.instrument(
+            //     self.system_task_metadata[system_index]
+            //         .system_task_span
+            //         .clone(),
+            // );
             scope.spawn_on_scope(task);
         } else {
             let task = async move {
@@ -604,12 +604,12 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(
-                self.system_task_metadata[system_index]
-                    .system_task_span
-                    .clone(),
-            );
+            // #[cfg(feature = "trace")]
+            // let task = task.instrument(
+            //     self.system_task_metadata[system_index]
+            //         .system_task_span
+            //         .clone(),
+            // );
             scope.spawn_on_scope(task);
         }
 
