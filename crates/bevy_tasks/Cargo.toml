@@ -18,7 +18,7 @@ async-io = {version = "1.13.0", optional = true}
 async-task = "4.2.0"
 concurrent-queue = "2.0.0"
 futures-lite = "1.4.0"
-smolscale = {git = "https://github.com/hymm/smolscale", branch = "lifetimed-executor"}
+smolscale = {git = "https://github.com/hymm/smolscale", branch = "thread_local_lib"}
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
