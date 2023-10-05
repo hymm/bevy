@@ -4,7 +4,7 @@ use std::{
     mem,
     panic::AssertUnwindSafe,
     sync::Arc,
-    thread::{self, JoinHandle},
+    thread::{self, JoinHandle}, pin::pin,
 };
 
 use async_task::FallibleTask;
@@ -402,6 +402,10 @@ impl TaskPool {
                     }
                     results
                 };
+
+                // let get results run off main thread, so is checked more readily and only needs to wake main thread when it completes
+                let get_results = executor.spawn(get_results);
+                let get_results = pin!(get_results);
 
                 let tick_task_pool_executor = tick_task_pool_executor || self.threads.is_empty();
 
