@@ -1186,7 +1186,7 @@ mod tests {
         app.add_systems(Update, (uses_assets, uses_assets));
         app.edit_schedule(Update, |s| {
             s.set_build_settings(ScheduleBuildSettings {
-                ambiguity_detection: LogLevel::Error,
+                ambiguity_detection_level: LogLevel::Error,
                 ..Default::default()
             });
         });

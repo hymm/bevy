@@ -1586,12 +1586,12 @@ impl ScheduleGraph {
         components: &Components,
         schedule_label: &BoxedScheduleLabel,
     ) -> Result<(), ScheduleBuildError> {
-        if self.settings.ambiguity_detection == LogLevel::Ignore || conflicts.is_empty() {
+        if self.settings.ambiguity_detection_level == LogLevel::Ignore || conflicts.is_empty() {
             return Ok(());
         }
 
         let message = self.get_conflicts_error_message(conflicts, components);
-        match self.settings.ambiguity_detection {
+        match self.settings.ambiguity_detection_level {
             LogLevel::Ignore => Ok(()),
             LogLevel::Warn => {
                 warn!("Schedule {schedule_label:?} has ambiguities.\n{}", message);
@@ -1725,6 +1725,20 @@ pub enum LogLevel {
     Error,
 }
 
+/// Setting to determine how ambiguities are reported.
+#[derive(Debug, Clone)]
+pub enum AmbiguityReportType {
+    /// ambiguities will be reported as a simple count. Switch to a different
+    /// report type for more details.
+    ///
+    /// TODO: add sample report
+    Count,
+    /// Ambiguities will be reported as pairs of systems that are ambiguous.
+    ///
+    /// TODO: add sample report
+    SystemPairs,
+}
+
 /// Specifies miscellaneous settings for schedule construction.
 #[derive(Clone, Debug)]
 pub struct ScheduleBuildSettings {
@@ -1732,7 +1746,9 @@ pub struct ScheduleBuildSettings {
     /// is only logged or also results in an [`Ambiguity`](ScheduleBuildError::Ambiguity) error.
     ///
     /// Defaults to [`LogLevel::Ignore`].
-    pub ambiguity_detection: LogLevel,
+    pub ambiguity_detection_level: LogLevel,
+    /// Sets the type of report that is output when an ambiguity is detected.
+    pub abmiguity_detection_report_type: AmbiguityReportType,
     /// Determines whether the presence of redundant edges in the hierarchy of system sets is only
     /// logged or also results in a [`HierarchyRedundancy`](ScheduleBuildError::HierarchyRedundancy)
     /// error.
@@ -1760,10 +1776,11 @@ impl ScheduleBuildSettings {
     /// See the field-level documentation for the default value of each field.
     pub const fn new() -> Self {
         Self {
-            ambiguity_detection: LogLevel::Ignore,
+            ambiguity_detection_level: LogLevel::Ignore,
             hierarchy_detection: LogLevel::Warn,
             use_shortnames: true,
             report_sets: true,
+            abmiguity_detection_report_type: AmbiguityReportType::Count,
         }
     }
 }
