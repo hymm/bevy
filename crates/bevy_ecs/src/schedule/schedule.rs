@@ -1590,7 +1590,14 @@ impl ScheduleGraph {
             return Ok(());
         }
 
-        let message = self.get_conflicts_error_message(conflicts, components);
+        let message = match self.settings.abmiguity_detection_report_type {
+            AmbiguityReportType::Count => {
+                self.get_conflicts_count_error_message(conflicts)
+            }
+            AmbiguityReportType::SystemPairs => {
+                self.get_conflicts_error_message(conflicts, components)
+            }
+        };
         match self.settings.ambiguity_detection_level {
             LogLevel::Ignore => Ok(()),
             LogLevel::Warn => {
@@ -1599,6 +1606,15 @@ impl ScheduleGraph {
             }
             LogLevel::Error => Err(ScheduleBuildError::Ambiguity(message)),
         }
+    }
+
+    fn get_conflicts_count_error_message(
+        &self,
+        ambiguities: &[(NodeId, NodeId, Vec<ComponentId>)],
+    ) -> String {
+        let n_ambiguities = ambiguities.len();
+        format!("{n_ambiguities} have been detected. Change ambiguity report style for more information or change LogLevel \
+            to Ignore to not see this message.")
     }
 
     fn get_conflicts_error_message(
@@ -1777,10 +1793,10 @@ impl ScheduleBuildSettings {
     pub const fn new() -> Self {
         Self {
             ambiguity_detection_level: LogLevel::Ignore,
+            abmiguity_detection_report_type: AmbiguityReportType::Count,
             hierarchy_detection: LogLevel::Warn,
             use_shortnames: true,
             report_sets: true,
-            abmiguity_detection_report_type: AmbiguityReportType::Count,
         }
     }
 }
