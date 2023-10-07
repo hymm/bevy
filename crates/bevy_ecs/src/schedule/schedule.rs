@@ -1591,9 +1591,7 @@ impl ScheduleGraph {
         }
 
         let message = match self.settings.abmiguity_detection_report_type {
-            AmbiguityReportType::Count => {
-                self.get_conflicts_count_error_message(conflicts)
-            }
+            AmbiguityReportType::Count => self.get_conflicts_count_error_message(conflicts),
             AmbiguityReportType::SystemPairs => {
                 self.get_conflicts_error_message(conflicts, components)
             }
@@ -1601,7 +1599,11 @@ impl ScheduleGraph {
         match self.settings.ambiguity_detection_level {
             LogLevel::Ignore => Ok(()),
             LogLevel::Warn => {
-                warn!("Schedule {schedule_label:?} has ambiguities.\n{}", message);
+                warn!(
+                    "\nSchedule `{schedule_label:?}` has ambiguities. \
+                    See https://bevyengine.org/learn/errors/#b0006 for more information. \
+                    \n{message}"
+                );
                 Ok(())
             }
             LogLevel::Error => Err(ScheduleBuildError::Ambiguity(message)),
@@ -1613,8 +1615,7 @@ impl ScheduleGraph {
         ambiguities: &[(NodeId, NodeId, Vec<ComponentId>)],
     ) -> String {
         let n_ambiguities = ambiguities.len();
-        format!("{n_ambiguities} have been detected. Change ambiguity report style for more information or change LogLevel \
-            to Ignore to not see this message.")
+        format!("{n_ambiguities} have been detected.")
     }
 
     fn get_conflicts_error_message(
@@ -1792,7 +1793,7 @@ impl ScheduleBuildSettings {
     /// See the field-level documentation for the default value of each field.
     pub const fn new() -> Self {
         Self {
-            ambiguity_detection_level: LogLevel::Ignore,
+            ambiguity_detection_level: LogLevel::Warn,
             abmiguity_detection_report_type: AmbiguityReportType::Count,
             hierarchy_detection: LogLevel::Warn,
             use_shortnames: true,
