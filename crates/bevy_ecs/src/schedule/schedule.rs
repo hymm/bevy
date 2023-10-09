@@ -4,8 +4,8 @@ use std::{
     result::Result,
 };
 
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::info_span;
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::info_span;
 use bevy_utils::{default, tracing::info};
 use bevy_utils::{
     petgraph::{algo::TarjanScc, prelude::*},
@@ -96,15 +96,15 @@ impl Schedules {
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
-        #[cfg(feature = "trace")]
-        let _all_span = info_span!("check stored schedule ticks").entered();
+        // #[cfg(feature = "trace")]
+        // let _all_span = info_span!("check stored schedule ticks").entered();
         // label used when trace feature is enabled
         #[allow(unused_variables)]
         for (label, schedule) in &mut self.inner {
-            #[cfg(feature = "trace")]
-            let name = format!("{label:?}");
-            #[cfg(feature = "trace")]
-            let _one_span = info_span!("check schedule ticks", name = &name).entered();
+            // #[cfg(feature = "trace")]
+            // let name = format!("{label:?}");
+            // #[cfg(feature = "trace")]
+            // let _one_span = info_span!("check schedule ticks", name = &name).entered();
             schedule.check_change_ticks(change_tick);
         }
     }
@@ -283,8 +283,8 @@ impl Schedule {
 
     /// Runs all systems in this schedule on the `world`, using its current execution strategy.
     pub fn run(&mut self, world: &mut World) {
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("schedule", name = ?self.name).entered();
+        // #[cfg(feature = "trace")]
+        // let _span = bevy_utils::tracing::info_span!("schedule", name = ?self.name).entered();
 
         world.check_change_ticks();
         self.initialize(world)

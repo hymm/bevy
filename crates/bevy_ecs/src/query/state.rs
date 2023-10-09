@@ -11,8 +11,8 @@ use crate::{
     storage::{TableId, TableRow},
     world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
 };
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::Span;
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::Span;
 use fixedbitset::FixedBitSet;
 use std::{any::TypeId, borrow::Borrow, fmt, mem::MaybeUninit};
 
@@ -39,8 +39,8 @@ pub struct QueryState<Q: WorldQuery, F: ReadOnlyWorldQuery = ()> {
     pub(crate) matched_archetype_ids: Vec<ArchetypeId>,
     pub(crate) fetch_state: Q::State,
     pub(crate) filter_state: F::State,
-    #[cfg(feature = "trace")]
-    par_iter_span: Span,
+    // #[cfg(feature = "trace")]
+    // par_iter_span: Span,
 }
 
 impl<Q: WorldQuery, F: ReadOnlyWorldQuery> std::fmt::Debug for QueryState<Q, F> {
@@ -127,12 +127,12 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
             matched_tables: Default::default(),
             matched_archetypes: Default::default(),
             archetype_component_access: Default::default(),
-            #[cfg(feature = "trace")]
-            par_iter_span: bevy_utils::tracing::info_span!(
-                "par_for_each",
-                query = std::any::type_name::<Q>(),
-                filter = std::any::type_name::<F>(),
-            ),
+            // #[cfg(feature = "trace")]
+            // par_iter_span: bevy_utils::tracing::info_span!(
+            //     "par_for_each",
+            //     query = std::any::type_name::<Q>(),
+            //     filter = std::any::type_name::<F>(),
+            // ),
         };
         state.update_archetypes(world);
         state
@@ -1214,8 +1214,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                         let func = func.clone();
                         let len = batch_size.min(table.entity_count() - offset);
                         scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
+                            // #[cfg(feature = "trace")]
+                            // let _span = self.par_iter_span.enter();
                             let mut fetch =
                                 Q::init_fetch(world, &self.fetch_state, last_run, this_run);
                             let mut filter =
@@ -1250,8 +1250,8 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                         let func = func.clone();
                         let len = batch_size.min(archetype.len() - offset);
                         scope.spawn(async move {
-                            #[cfg(feature = "trace")]
-                            let _span = self.par_iter_span.enter();
+                            // #[cfg(feature = "trace")]
+                            // let _span = self.par_iter_span.enter();
                             let mut fetch =
                                 Q::init_fetch(world, &self.fetch_state, last_run, this_run);
                             let mut filter =

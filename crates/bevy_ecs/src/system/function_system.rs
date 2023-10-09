@@ -10,8 +10,8 @@ use crate::{
 use bevy_utils::all_tuples;
 use std::{any::TypeId, borrow::Cow, marker::PhantomData};
 
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::{info_span, Span};
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::{info_span, Span};
 
 use super::{In, IntoSystem, ReadOnlySystem};
 
@@ -25,10 +25,10 @@ pub struct SystemMeta {
     // SystemParams from overriding each other
     is_send: bool,
     pub(crate) last_run: Tick,
-    #[cfg(feature = "trace")]
-    pub(crate) system_span: Span,
-    #[cfg(feature = "trace")]
-    pub(crate) commands_span: Span,
+    // #[cfg(feature = "trace")]
+    // pub(crate) system_span: Span,
+    // #[cfg(feature = "trace")]
+    // pub(crate) commands_span: Span,
 }
 
 impl SystemMeta {
@@ -40,10 +40,10 @@ impl SystemMeta {
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             last_run: Tick::new(0),
-            #[cfg(feature = "trace")]
-            system_span: info_span!("system", name = name),
-            #[cfg(feature = "trace")]
-            commands_span: info_span!("system_commands", name = name),
+            // #[cfg(feature = "trace")]
+            // system_span: info_span!("system", name = name),
+            // #[cfg(feature = "trace")]
+            // commands_span: info_span!("system_commands", name = name),
         }
     }
 
@@ -465,8 +465,8 @@ where
 
     #[inline]
     unsafe fn run_unsafe(&mut self, input: Self::In, world: UnsafeWorldCell) -> Self::Out {
-        #[cfg(feature = "trace")]
-        let _span_guard = self.system_meta.system_span.enter();
+        // #[cfg(feature = "trace")]
+        // let _span_guard = self.system_meta.system_span.enter();
 
         let change_tick = world.increment_change_tick();
 
