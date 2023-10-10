@@ -4,8 +4,8 @@ use std::{
 };
 
 use bevy_utils::default;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::info_span;
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::info_span;
 use bevy_utils::{
     petgraph::{algo::TarjanScc, prelude::*},
     thiserror::Error,
@@ -100,15 +100,15 @@ impl Schedules {
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub(crate) fn check_change_ticks(&mut self, change_tick: u32) {
-        #[cfg(feature = "trace")]
-        let _all_span = info_span!("check stored schedule ticks").entered();
-        // label used when trace feature is enabled
+        // #[cfg(feature = "trace")]
+        // let _all_span = info_span!("check stored schedule ticks").entered();
+        // // label used when trace feature is enabled
         #[allow(unused_variables)]
         for (label, schedule) in self.inner.iter_mut() {
-            #[cfg(feature = "trace")]
-            let name = format!("{label:?}");
-            #[cfg(feature = "trace")]
-            let _one_span = info_span!("check schedule ticks", name = &name).entered();
+            // #[cfg(feature = "trace")]
+            // let name = format!("{label:?}");
+            // #[cfg(feature = "trace")]
+            // let _one_span = info_span!("check schedule ticks", name = &name).entered();
             schedule.check_change_ticks(change_tick);
         }
     }

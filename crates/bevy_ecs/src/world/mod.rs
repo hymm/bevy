@@ -1514,8 +1514,8 @@ impl World {
             ref mut non_send_resources,
         } = self.storages;
 
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("check component ticks").entered();
+        // #[cfg(feature = "trace")]
+        // let _span = bevy_utils::tracing::info_span!("check component ticks").entered();
         tables.check_change_ticks(change_tick);
         sparse_sets.check_change_ticks(change_tick);
         resources.check_change_ticks(change_tick);
@@ -1743,8 +1743,8 @@ impl World {
             .unwrap_or_else(|| panic!("The schedule with the label {label:?} was not found."));
 
         // TODO: move this span to Schedule::run
-        #[cfg(feature = "trace")]
-        let _span = bevy_utils::tracing::info_span!("schedule", name = ?extracted_label).entered();
+        // #[cfg(feature = "trace")]
+        // let _span = bevy_utils::tracing::info_span!("schedule", name = ?extracted_label).entered();
         schedule.run(self);
         self.resource_mut::<Schedules>()
             .insert(extracted_label, schedule);

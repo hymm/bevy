@@ -3,8 +3,8 @@ use std::sync::Arc;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
 use bevy_utils::default;
 use bevy_utils::syncunsafecell::SyncUnsafeCell;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::{info_span, Instrument};
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::{info_span, Instrument};
 use std::panic::AssertUnwindSafe;
 
 use async_channel::{Receiver, Sender};
@@ -206,10 +206,10 @@ impl SystemExecutor for MultiThreadedExecutor {
                     }
                 };
 
-                #[cfg(feature = "trace")]
-                let executor_span = info_span!("multithreaded executor");
-                #[cfg(feature = "trace")]
-                let executor = executor.instrument(executor_span);
+                // #[cfg(feature = "trace")]
+                // let executor_span = info_span!("multithreaded executor");
+                // #[cfg(feature = "trace")]
+                // let executor = executor.instrument(executor_span);
                 scope.spawn(executor);
             },
         );
@@ -434,21 +434,21 @@ impl MultiThreadedExecutor {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *systems[system_index].get() };
 
-        #[cfg(feature = "trace")]
-        let task_span = info_span!("system_task", name = &*system.name());
-        #[cfg(feature = "trace")]
-        let system_span = info_span!("system", name = &*system.name());
+        // #[cfg(feature = "trace")]
+        // let task_span = info_span!("system_task", name = &*system.name());
+        // #[cfg(feature = "trace")]
+        // let system_span = info_span!("system", name = &*system.name());
 
         let sender = self.sender.clone();
         let task = async move {
-            #[cfg(feature = "trace")]
-            let system_guard = system_span.enter();
+            // #[cfg(feature = "trace")]
+            // let system_guard = system_span.enter();
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 // SAFETY: access is compatible
                 unsafe { system.run_unsafe((), world) };
             }));
-            #[cfg(feature = "trace")]
-            drop(system_guard);
+            // #[cfg(feature = "trace")]
+            // drop(system_guard);
             if res.is_err() {
                 // close the channel to propagate the error to the
                 // multithreaded executor
@@ -460,8 +460,8 @@ impl MultiThreadedExecutor {
             }
         };
 
-        #[cfg(feature = "trace")]
-        let task = task.instrument(task_span);
+        // #[cfg(feature = "trace")]
+        // let task = task.instrument(task_span);
 
         let system_meta = &self.system_task_metadata[system_index];
         self.active_access
@@ -487,10 +487,10 @@ impl MultiThreadedExecutor {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *systems[system_index].get() };
 
-        #[cfg(feature = "trace")]
-        let task_span = info_span!("system_task", name = &*system.name());
-        #[cfg(feature = "trace")]
-        let system_span = info_span!("system", name = &*system.name());
+        // #[cfg(feature = "trace")]
+        // let task_span = info_span!("system_task", name = &*system.name());
+        // #[cfg(feature = "trace")]
+        // let system_span = info_span!("system", name = &*system.name());
 
         let sender = self.sender.clone();
         if is_apply_system_buffers(system) {
@@ -498,13 +498,13 @@ impl MultiThreadedExecutor {
             let unapplied_systems = self.unapplied_systems.clone();
             self.unapplied_systems.clear();
             let task = async move {
-                #[cfg(feature = "trace")]
-                let system_guard = system_span.enter();
+                // #[cfg(feature = "trace")]
+                // let system_guard = system_span.enter();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     apply_system_buffers(&unapplied_systems, systems, world);
                 }));
-                #[cfg(feature = "trace")]
-                drop(system_guard);
+                // #[cfg(feature = "trace")]
+                // drop(system_guard);
                 if res.is_err() {
                     // close the channel to propagate the error to the
                     // multithreaded executor
@@ -516,18 +516,18 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(task_span);
+            // #[cfg(feature = "trace")]
+            // let task = task.instrument(task_span);
             scope.spawn_on_scope(task);
         } else {
             let task = async move {
-                #[cfg(feature = "trace")]
-                let system_guard = system_span.enter();
+                // #[cfg(feature = "trace")]
+                // let system_guard = system_span.enter();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     system.run((), world);
                 }));
-                #[cfg(feature = "trace")]
-                drop(system_guard);
+                // #[cfg(feature = "trace")]
+                // drop(system_guard);
                 if res.is_err() {
                     // close the channel to propagate the error to the
                     // multithreaded executor
@@ -539,8 +539,8 @@ impl MultiThreadedExecutor {
                 }
             };
 
-            #[cfg(feature = "trace")]
-            let task = task.instrument(task_span);
+            // #[cfg(feature = "trace")]
+            // let task = task.instrument(task_span);
             scope.spawn_on_scope(task);
         }
 
@@ -611,8 +611,8 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &World
     conditions
         .iter_mut()
         .map(|condition| {
-            #[cfg(feature = "trace")]
-            let _condition_span = info_span!("condition", name = &*condition.name()).entered();
+            // #[cfg(feature = "trace")]
+            // let _condition_span = info_span!("condition", name = &*condition.name()).entered();
             // SAFETY: caller ensures system access is compatible
             unsafe { condition.run_unsafe((), world) }
         })

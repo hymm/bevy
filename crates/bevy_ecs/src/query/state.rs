@@ -11,8 +11,8 @@ use crate::{
     world::{World, WorldId},
 };
 use bevy_tasks::ComputeTaskPool;
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::Instrument;
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::Instrument;
 use fixedbitset::FixedBitSet;
 use std::{borrow::Borrow, fmt, mem::MaybeUninit};
 
@@ -974,15 +974,15 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                                 func(Q::fetch(&mut fetch, *entity, row));
                             }
                         };
-                        #[cfg(feature = "trace")]
-                        let span = bevy_utils::tracing::info_span!(
-                            "par_for_each",
-                            query = std::any::type_name::<Q>(),
-                            filter = std::any::type_name::<F>(),
-                            count = len,
-                        );
-                        #[cfg(feature = "trace")]
-                        let task = task.instrument(span);
+                        // #[cfg(feature = "trace")]
+                        // let span = bevy_utils::tracing::info_span!(
+                        //     "par_for_each",
+                        //     query = std::any::type_name::<Q>(),
+                        //     filter = std::any::type_name::<F>(),
+                        //     count = len,
+                        // );
+                        // #[cfg(feature = "trace")]
+                        // let task = task.instrument(span);
                         scope.spawn(task);
                         offset += batch_size;
                     }
@@ -1037,15 +1037,15 @@ impl<Q: WorldQuery, F: ReadOnlyWorldQuery> QueryState<Q, F> {
                             }
                         };
 
-                        #[cfg(feature = "trace")]
-                        let span = bevy_utils::tracing::info_span!(
-                            "par_for_each",
-                            query = std::any::type_name::<Q>(),
-                            filter = std::any::type_name::<F>(),
-                            count = len,
-                        );
-                        #[cfg(feature = "trace")]
-                        let task = task.instrument(span);
+                        // #[cfg(feature = "trace")]
+                        // let span = bevy_utils::tracing::info_span!(
+                        //     "par_for_each",
+                        //     query = std::any::type_name::<Q>(),
+                        //     filter = std::any::type_name::<F>(),
+                        //     count = len,
+                        // );
+                        // #[cfg(feature = "trace")]
+                        // let task = task.instrument(span);
 
                         scope.spawn(task);
                         offset += batch_size;

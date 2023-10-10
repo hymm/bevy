@@ -1,5 +1,5 @@
-#[cfg(feature = "trace")]
-use bevy_utils::tracing::info_span;
+// #[cfg(feature = "trace")]
+// use bevy_utils::tracing::info_span;
 use fixedbitset::FixedBitSet;
 
 use crate::{
@@ -35,10 +35,10 @@ impl SystemExecutor for SimpleExecutor {
 
     fn run(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in 0..schedule.systems.len() {
-            #[cfg(feature = "trace")]
-            let name = schedule.systems[system_index].name();
-            #[cfg(feature = "trace")]
-            let should_run_span = info_span!("check_conditions", name = &*name).entered();
+            // #[cfg(feature = "trace")]
+            // let name = schedule.systems[system_index].name();
+            // #[cfg(feature = "trace")]
+            // let should_run_span = info_span!("check_conditions", name = &*name).entered();
 
             let mut should_run = !self.completed_systems.contains(system_index);
             for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
@@ -65,8 +65,8 @@ impl SystemExecutor for SimpleExecutor {
 
             should_run &= system_conditions_met;
 
-            #[cfg(feature = "trace")]
-            should_run_span.exit();
+            // #[cfg(feature = "trace")]
+            // should_run_span.exit();
 
             // system has either been skipped or will run
             self.completed_systems.insert(system_index);
@@ -76,11 +76,11 @@ impl SystemExecutor for SimpleExecutor {
             }
 
             let system = &mut schedule.systems[system_index];
-            #[cfg(feature = "trace")]
-            let system_span = info_span!("system", name = &*name).entered();
+            // #[cfg(feature = "trace")]
+            // let system_span = info_span!("system", name = &*name).entered();
             system.run((), world);
-            #[cfg(feature = "trace")]
-            system_span.exit();
+            // #[cfg(feature = "trace")]
+            // system_span.exit();
 
             system.apply_buffers(world);
         }
@@ -105,8 +105,8 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut W
     conditions
         .iter_mut()
         .map(|condition| {
-            #[cfg(feature = "trace")]
-            let _condition_span = info_span!("condition", name = &*condition.name()).entered();
+            // #[cfg(feature = "trace")]
+            // let _condition_span = info_span!("condition", name = &*condition.name()).entered();
             condition.run((), world)
         })
         .fold(true, |acc, res| acc && res)
