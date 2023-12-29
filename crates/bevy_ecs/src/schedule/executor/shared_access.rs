@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use std::sync::{Arc, Mutex};
 
 // TODO: experiment with other mutexes including the async one.
-struct SharedSystemAccess {
+pub struct SharedSystemAccess {
     access: Arc<Mutex<Access<ArchetypeComponentId>>>,
     // active access
     active_access: Arc<DashMap<usize, Access<ArchetypeComponentId>>>,
