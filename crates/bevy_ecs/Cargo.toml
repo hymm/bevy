@@ -32,6 +32,7 @@ thiserror = "1.0"
 nonmax = "0.5"
 async-broadcast = "0.6.0"
 dashmap = "5.5.3"
+once_cell = "1.19.0"
 
 [dev-dependencies]
 rand = "0.8"

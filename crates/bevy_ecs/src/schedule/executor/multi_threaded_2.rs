@@ -1,22 +1,30 @@
-use std::{future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{atomic::AtomicBool, Arc, Mutex, TryLockError},
+};
 
 use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use bevy_utils::syncunsafecell::SyncUnsafeCell;
+use fixedbitset::FixedBitSet;
+// std once cell is not thread safe
+use once_cell::sync::OnceCell;
 
 use super::{
-    shared_access::SharedSystemAccess, ExecutorKind, MainThreadExecutor, SyncUnsafeSchedule,
-    SystemExecutor, SystemSchedule,
+    shared_access::SharedSystemAccess, Conditions, ExecutorKind, MainThreadExecutor,
+    SyncUnsafeSchedule, SystemExecutor, SystemSchedule,
 };
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
+    schedule::BoxedCondition,
     system::BoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
-#[derive(Clone)]
 /// struct that contains all the data needed to run a system task
+#[derive(Clone)]
 struct SystemTask {
     /// index of system in systems vec
     system_id: usize,
@@ -28,6 +36,11 @@ struct SystemTask {
     dependents: Vec<DependentSystem>,
 
     archetype_component_access: Access<ArchetypeComponentId>,
+
+    system_set_run_conditions: Vec<ThreadSafeRunCondition>,
+    // TODO, see if we can make this just a Vec<BoxedCondition>.
+    // Made it a ThreadSafeRunConditino because it needed to be clone
+    system_run_conditions: Vec<ThreadSafeRunCondition>,
 }
 
 impl SystemTask {
@@ -43,54 +56,106 @@ impl SystemTask {
         let system = unsafe { &mut *systems[self.system_id].get() };
 
         let task = async move {
-          let mut count = 0;
-          while count < self.dependencies_count {
-              // wait for a dependency to complete
-              self.dependency_finished_channel.recv().await.unwrap();
-              count += 1;
-          }
+            let mut count = 0;
+            while count < self.dependencies_count {
+                // wait for a dependency to complete
+                self.dependency_finished_channel.recv().await.unwrap();
+                count += 1;
+            }
 
-          // TODO: shared access should account for exclusive systems and non send systems
-          shared_access
-              .wait_for_access(&self.archetype_component_access, self.system_id)
-              .await;
+            // TODO: figure out when to call update_archetype_component_access for conditions and
+            // the system
+            // TODO: shared access should account for exclusive systems and non send systems
+            shared_access
+                .wait_for_access(&self.archetype_component_access, self.system_id)
+                .await;
 
-          // TODO: check run conditions
-          // TODO: readd panic handling or fix in scope
-          // SAFETY: shared_access is holding locks for the data this system accesses
-          unsafe { system.run_unsafe((), world_cell) };
+            // SAFETY: shared access is holding locks for the data that all the run conditions access
+            if unsafe { self.should_run(world_cell) } {
+                // TODO: readd panic handling or fix in scope
+                // SAFETY: shared_access is holding locks for the data this system accesses
+                unsafe { system.run_unsafe((), world_cell) };
+            }
 
-          // run dependencies
-          let mut first_dependent = None;
-          for dependent in &self.dependents {
-              match dependent {
-                  DependentSystem::NotificationChannel(channel) => {
-                      channel.send_blocking(()).unwrap();
-                  }
-                  DependentSystem::System(system_task) => {
-                      if first_dependent.is_none() {
-                          // let task = system_task.clone();
-                          first_dependent = Some(system_task.get_task(
-                              systems,
-                              world_cell,
-                              scope,
-                              shared_access.clone(),
-                          ));
-                      } else {
-                          scope.spawn(system_task.get_task(
-                              systems,
-                              world_cell,
-                              scope,
-                              shared_access.clone(),
-                          ));
-                      }
-                  }
-              }
-          }
-      }; 
-      // TODO: add
-      // let task = task.instrument(self.system_task_span)
-      Box::pin(task)
+            // run dependencies
+            let mut first_dependent = None;
+            for dependent in &self.dependents {
+                match dependent {
+                    DependentSystem::NotificationChannel(channel) => {
+                        channel.send_blocking(()).unwrap();
+                    }
+                    DependentSystem::System(system_task) => {
+                        if first_dependent.is_none() {
+                            // let task = system_task.clone();
+                            first_dependent = Some(system_task.get_task(
+                                systems,
+                                world_cell,
+                                scope,
+                                shared_access.clone(),
+                            ));
+                        } else {
+                            scope.spawn(system_task.get_task(
+                                systems,
+                                world_cell,
+                                scope,
+                                shared_access.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        };
+        // TODO: add instrumentation back
+        // let task = task.instrument(self.system_task_span)
+        Box::pin(task)
+    }
+
+    // TODO: check the safety here
+    /// # Safety
+    /// * `world` must have permission to read any world data required by
+    ///   the system's conditions: this includes conditions for the system
+    ///   itself, and conditions for any of the system's sets.
+    /// * `update_archetype_component` must have been called with `world`
+    ///   for each run condition in `conditions`.
+    unsafe fn should_run(&self, world: UnsafeWorldCell) -> bool {
+        let mut should_run = true;
+        for condition in self.system_set_run_conditions.iter() {
+            if !condition.can_run(world) {
+                should_run = false;
+            }
+        }
+
+        for mut condition in self.system_run_conditions.iter() {
+            if unsafe { !condition.can_run(world) } {
+                should_run = false;
+            }
+        }
+
+        should_run
+    }
+}
+
+#[derive(Clone)]
+struct ThreadSafeRunCondition {
+    result: OnceCell<bool>,
+    condition: Arc<Mutex<BoxedCondition>>,
+}
+
+impl ThreadSafeRunCondition {
+    /// Safety: Must have a lock on all the data in `world` that `self.condition` needs to run.
+    unsafe fn can_run(&self, world: UnsafeWorldCell) -> bool {
+        if let Some(result) = self.result.get() {
+            *result
+        } else {
+            let mut condition = self.condition.lock().unwrap();
+            let run = unsafe { condition.run_unsafe((), world) };
+            let result = self.result.set(run);
+            if let Err(actual_val) = result {
+                actual_val
+            } else {
+                run
+            }
+        }
     }
 }
 
@@ -115,7 +180,13 @@ impl SystemExecutor for MultiThreadedExecutor {
         todo!()
     }
 
-    fn run(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
+    fn run(
+        &mut self,
+        schedule: &mut SystemSchedule,
+        // TODO: Make skip_systems work correctly
+        _skip_systems: Option<FixedBitSet>,
+        world: &mut World,
+    ) {
         let thread_executor = world
             .get_resource::<MainThreadExecutor>()
             .map(|e| e.0.clone());
@@ -133,7 +204,7 @@ impl SystemExecutor for MultiThreadedExecutor {
                 let world_cell = world.as_unsafe_world_cell();
                 for root in &self.roots {
                     scope.spawn(root.get_task(
-                        &systems,
+                        systems,
                         world_cell,
                         scope,
                         self.shared_access.clone(),
