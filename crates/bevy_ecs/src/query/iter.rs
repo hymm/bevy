@@ -6,7 +6,10 @@ use crate::{
     storage::{Table, TableId, TableRow, Tables},
     world::unsafe_world_cell::UnsafeWorldCell,
 };
-use std::{borrow::Borrow, iter::FusedIterator, mem::MaybeUninit, ops::Range};
+use std::{
+    borrow::Borrow, fmt::Debug, iter::FusedIterator, marker::PhantomData, mem::MaybeUninit,
+    ops::Range,
+};
 
 use super::{QueryData, QueryFilter, ReadOnlyQueryData};
 
@@ -841,8 +844,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
     }
 }
 
-pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
-    world: &'w World,
+pub struct QueryProducer<'w, 's, Q: QueryData, F: QueryFilter> {
+    world: UnsafeWorldCell<'w>,
     query_state: &'s QueryState<Q, F>,
     last_run: Tick,
     this_run: Tick,
@@ -852,7 +855,7 @@ pub struct QueryProducer<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     last_row: usize,
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Debug for QueryProducer<'w, 's, Q, F> {
+impl<'w, 's, Q: QueryData, F: QueryFilter> Debug for QueryProducer<'w, 's, Q, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryProducer")
             .field("table_ids", &self.table_ids)
@@ -863,11 +866,11 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Debug for QueryProducer<'w, '
     }
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
+impl<'w, 's, Q: QueryData, F: QueryFilter> QueryProducer<'w, 's, Q, F> {
     const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
 
     pub fn new(
-        world: &'w World,
+        world: UnsafeWorldCell<'w>,
         query_state: &'s QueryState<Q, F>,
         last_run: Tick,
         this_run: Tick,
@@ -908,7 +911,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
         if Self::IS_DENSE && self.table_ids.len() == 1 {
             let table = self
                 .world
-                .storages
+                .storages()
                 .tables
                 .get(self.table_ids[0])
                 .debug_checked_unwrap();
@@ -927,19 +930,19 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                     .iter()
                     .enumerate(),
                 archetype_entities_iter: [].iter(), // unused in this branch
-                _phantom_data: PhantomData::default(),
+                _phantom_data: PhantomData,
             });
         }
 
         if !Self::IS_DENSE && self.archetype_ids.len() == 1 {
             let archetype = self
                 .world
-                .archetypes
+                .archetypes()
                 .get(self.archetype_ids[0])
                 .debug_checked_unwrap();
             let table = self
                 .world
-                .storages
+                .storages()
                 .tables
                 .get(archetype.table_id())
                 .debug_checked_unwrap();
@@ -965,7 +968,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 archetype_entities_iter: entities
                     [self.start_row.min(length)..self.last_row.min(length)]
                     .iter(),
-                _phantom_data: PhantomData::default(),
+                _phantom_data: PhantomData,
             });
         }
 
@@ -978,13 +981,12 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
             filter,
             current_len: 0,
             current_row: 0,
-            phantom: PhantomData::default(),
         };
 
         ProducerIter::Multiple(QueryIter {
             query_state: self.query_state,
-            tables: &self.world.storages.tables,
-            archetypes: &self.world.archetypes,
+            tables: &self.world.storages().tables,
+            archetypes: &self.world.archetypes(),
             cursor,
         })
     }
@@ -1062,16 +1064,22 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 .map(|(index, id)| {
                     // adjust table counts for start_row and last_row
                     if length == 1 {
-                        self.last_row
-                            .min(self.world.storages.tables[*id].entity_count())
-                            - self.start_row
+                        // SAFETY: storages are only accessed immutably during parallel iteration
+                        unsafe {
+                            self.last_row
+                                .min(self.world.storages().tables[*id].entity_count())
+                                - self.start_row
+                        }
                     } else if index == 0 {
-                        self.world.storages.tables[*id].entity_count() - self.start_row
+                        // SAFETY: storages are only accessed immutably during parallel iteration
+                        unsafe { self.world.storages().tables[*id].entity_count() - self.start_row }
                     } else if index == length - 1 {
+                        // SAFETY: storages are only accessed immutably during parallel iteration
                         self.last_row
-                            .min(self.world.storages.tables[*id].entity_count())
+                            .min(unsafe { self.world.storages().tables[*id].entity_count() })
                     } else {
-                        self.world.storages.tables[*id].entity_count()
+                        // SAFETY: storages are only accessed immutably during parallel iteration
+                        unsafe { self.world.storages().tables[*id].entity_count() }
                     }
                 })
                 .position(|count| {
@@ -1126,13 +1134,13 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
                 .map(|(index, id)| {
                     // adjust table counts for start_row and last_row
                     if length == 1 {
-                        self.last_row.min(self.world.archetypes[*id].len()) - self.start_row
+                        self.last_row.min(self.world.archetypes()[*id].len()) - self.start_row
                     } else if index == 0 {
-                        self.world.archetypes[*id].len() - self.start_row
+                        self.world.archetypes()[*id].len() - self.start_row
                     } else if index == length - 1 {
-                        self.last_row.min(self.world.archetypes[*id].len())
+                        self.last_row.min(self.world.archetypes()[*id].len())
                     } else {
-                        self.world.archetypes[*id].len()
+                        self.world.archetypes()[*id].len()
                     }
                 })
                 .position(|count| {
@@ -1167,9 +1175,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QueryProducer<'w, 's, Q, F> {
     }
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
-    for QueryProducer<'w, 's, Q, F>
-{
+impl<'w, 's, Q: QueryData, F: QueryFilter> bevy_tasks::Producer for QueryProducer<'w, 's, Q, F> {
     type Item = Q::Item<'w>;
     type IntoIter = ProducerIter<'w, 's, Q, F>;
 
@@ -1182,25 +1188,31 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
     fn len(&self) -> usize {
         if Self::IS_DENSE {
             if self.table_ids.len() == 1 {
-                self.world.storages.tables[self.table_ids[0]]
-                    .entity_count()
-                    .min(self.last_row)
-                    - self.start_row
+                // SAFETY: storages are only accessed immutably during parallel iteration
+                unsafe {
+                    self.world.storages().tables[self.table_ids[0]]
+                        .entity_count()
+                        .min(self.last_row)
+                        - self.start_row
+                }
             } else {
-                self.table_ids
-                    .iter()
-                    .map(|id| self.world.storages.tables[*id].entity_count())
-                    .sum()
+                // SAFETY: storages are only accessed immutably during parallel iteration
+                unsafe {
+                    self.table_ids
+                        .iter()
+                        .map(|id| self.world.storages().tables[*id].entity_count())
+                        .sum()
+                }
             }
         } else if self.archetype_ids.len() == 1 {
-            self.world.archetypes[self.archetype_ids[0]]
+            self.world.archetypes()[self.archetype_ids[0]]
                 .len()
                 .min(self.last_row)
                 - self.start_row
         } else {
             self.archetype_ids
                 .iter()
-                .map(|id| self.world.archetypes[*id].len())
+                .map(|id| self.world.archetypes()[*id].len())
                 .sum()
         }
     }
@@ -1210,12 +1222,12 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> bevy_tasks::Producer
     }
 }
 
-pub enum ProducerIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
+pub enum ProducerIter<'w, 's, Q: QueryData, F: QueryFilter> {
     Simple(QuerySimpleIter<'w, 's, Q, F>),
     Multiple(QueryIter<'w, 's, Q, F>),
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for ProducerIter<'w, 's, Q, F> {
+impl<'w, 's, Q: QueryData, F: QueryFilter> Iterator for ProducerIter<'w, 's, Q, F> {
     type Item = Q::Item<'w>;
 
     #[inline(always)]
@@ -1235,7 +1247,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for ProducerIter<'w,
 }
 
 /// iterator over part of a single table or archetype
-pub struct QuerySimpleIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
+pub struct QuerySimpleIter<'w, 's, Q: QueryData, F: QueryFilter> {
     fetch: Q::Fetch<'w>,
     filter: F::Fetch<'w>,
     start_row: usize,
@@ -1244,7 +1256,7 @@ pub struct QuerySimpleIter<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> {
     _phantom_data: PhantomData<&'s ()>,
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F> {
+impl<'w, 's, Q: QueryData, F: QueryFilter> QuerySimpleIter<'w, 's, Q, F> {
     const IS_DENSE: bool = Q::IS_DENSE && F::IS_DENSE;
 
     #[inline(always)]
@@ -1254,7 +1266,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F>
                 // SAFETY: set_table was called when constructing QuerySimpleIter.
                 let (index, entity) = self.table_entities_iter.next()?;
 
-                let row = TableRow::new(index + self.start_row);
+                let row = TableRow::from_usize(index + self.start_row);
                 if !F::filter_fetch(&mut self.filter, *entity, row) {
                     continue;
                 }
@@ -1267,17 +1279,13 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F>
             loop {
                 // SAFETY: set_table was called when constructing QuerySimpleIter.
                 let entity = self.archetype_entities_iter.next()?;
-                if !F::filter_fetch(&mut self.filter, entity.entity(), entity.table_row()) {
+                if !F::filter_fetch(&mut self.filter, entity.id(), entity.table_row()) {
                     continue;
                 }
 
                 // SAFETY: set_table was called prior.
                 // `current_row` is a table row in range of the current table, because if it was not, then the if above would have been executed.
-                return Some(Q::fetch(
-                    &mut self.fetch,
-                    entity.entity(),
-                    entity.table_row(),
-                ));
+                return Some(Q::fetch(&mut self.fetch, entity.id(), entity.table_row()));
             }
         }
     }
@@ -1291,7 +1299,7 @@ impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> QuerySimpleIter<'w, 's, Q, F>
     }
 }
 
-impl<'w, 's, Q: WorldQuery, F: ReadOnlyWorldQuery> Iterator for QuerySimpleIter<'w, 's, Q, F> {
+impl<'w, 's, Q: QueryData, F: QueryFilter> Iterator for QuerySimpleIter<'w, 's, Q, F> {
     type Item = Q::Item<'w>;
 
     #[inline(always)]
@@ -1310,7 +1318,7 @@ mod tests {
     mod query_producer {
         use super::*;
         use crate as bevy_ecs;
-        use crate::prelude::{Component, With};
+        use crate::prelude::{Component, With, World};
 
         #[derive(Component)]
         struct C;
@@ -1322,7 +1330,7 @@ mod tests {
         // helper function to check entities id's in a producer
         fn get_entities<F>(producer: QueryProducer<Entity, F>) -> Vec<String>
         where
-            F: ReadOnlyWorldQuery,
+            F: QueryFilter,
         {
             // Safety: this is the only active query on the world, so there is no conflicting access
             unsafe {
@@ -1338,7 +1346,12 @@ mod tests {
             let mut world = World::new();
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
 
             // Safety: this is the only active query on the world
             assert!(unsafe { producer.into_iter().next().is_none() });
@@ -1351,13 +1364,23 @@ mod tests {
 
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
 
             assert_eq!(get_entities(producer), vec!["0v0"]);
 
             world.spawn(C);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             assert_eq!(get_entities(producer), vec!["0v0", "1v0"]);
         }
 
@@ -1365,7 +1388,12 @@ mod tests {
         fn split_single_table() {
             let mut world = World::new();
             let mut query_state = QueryState::<Entity, With<C>>::new(&mut world);
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(0);
             assert_eq!(get_entities(left_producer), Vec::<&str>::new());
             assert_eq!(get_entities(right_producer), Vec::<&str>::new());
@@ -1374,13 +1402,23 @@ mod tests {
             query_state.update_archetypes(&world);
 
             // splitting at 0 should put all the elements in the right producer
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(0);
             assert_eq!(get_entities(left_producer), Vec::<&str>::new());
             assert_eq!(get_entities(right_producer), vec!["0v0"]);
 
             // should put all elements in  left producer if position is greater than the length
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(2);
             assert_eq!(get_entities(left_producer), vec!["0v0"]);
             assert_eq!(get_entities(right_producer), Vec::<&str>::new());
@@ -1396,12 +1434,22 @@ mod tests {
                 .collect::<Vec<_>>());
 
             // should split at correct position
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(1);
             assert_eq!(get_entities(left_producer), vec!["0v0"]);
             assert_eq!(get_entities(right_producer), vec!["1v0", "2v0"]);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(2);
             assert_eq!(get_entities(left_producer), vec!["0v0", "1v0"]);
             assert_eq!(get_entities(right_producer), vec!["2v0"]);
@@ -1427,7 +1475,12 @@ mod tests {
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
 
             // split on a table boundary
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(3);
             assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
             assert_eq!(
@@ -1436,7 +1489,12 @@ mod tests {
             );
 
             // split in the middle of the second table
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(4);
             assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
             assert_eq!(
@@ -1454,13 +1512,23 @@ mod tests {
             query_state.update_archetypes(&world);
 
             // splitting at 0 should put all the elements in the right producer
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(0);
             assert_eq!(get_entities(left_producer), Vec::<&str>::new());
             assert_eq!(get_entities(right_producer), vec!["0v0"]);
 
             // should put all elements in  left producer if position is greater than the length
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(2);
             assert_eq!(get_entities(left_producer), vec!["0v0"]);
             assert_eq!(get_entities(right_producer), Vec::<&str>::new());
@@ -1476,12 +1544,22 @@ mod tests {
                 .collect::<Vec<_>>());
 
             // should split at correct position
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(1);
             assert_eq!(get_entities(left_producer), vec!["0v0"]);
             assert_eq!(get_entities(right_producer), vec!["1v0", "2v0"]);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(2);
             assert_eq!(get_entities(left_producer), vec!["0v0", "1v0"]);
             assert_eq!(get_entities(right_producer), vec!["2v0"]);
@@ -1507,7 +1585,12 @@ mod tests {
             let query_state = QueryState::<Entity, With<S>>::new(&mut world);
 
             // split on a table boundary
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(3);
             assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
             assert_eq!(
@@ -1516,7 +1599,12 @@ mod tests {
             );
 
             // split in the middle of the second table
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(4);
             assert_eq!(get_entities(left_producer), vec!["0v0", "2v0", "4v0"]);
             assert_eq!(
@@ -1531,7 +1619,12 @@ mod tests {
             world.spawn_batch((0..10).map(|_| (C)));
             let query_state = QueryState::<Entity, With<C>>::new(&mut world);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(5);
 
             {
@@ -1554,7 +1647,12 @@ mod tests {
             world.spawn_batch((0..10).map(|_| (S)));
             let query_state = QueryState::<Entity, With<S>>::new(&mut world);
 
-            let producer = QueryProducer::new(&world, &query_state, Tick::new(0), Tick::new(0));
+            let producer = QueryProducer::new(
+                world.as_unsafe_world_cell(),
+                &query_state,
+                Tick::new(0),
+                Tick::new(0),
+            );
             let (left_producer, right_producer) = producer.split_at(5);
 
             let (left_producer_1, right_producer_1) = left_producer.split_at(2);

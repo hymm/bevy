@@ -1114,7 +1114,11 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ) {
         // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter, QueryState::for_each_unchecked_manual, QueryState::par_for_each_unchecked_manual
-        ComputeTaskPool::get().scope(|scope| {
+
+        use bevy_tasks::Producer;
+        use super::QueryProducer;
+        
+        bevy_tasks::ComputeTaskPool::get().scope(|scope| {
             let producer = QueryProducer::new(world, self, last_run, this_run);
             let length = producer.len();
             bevy_tasks::execute_operation(scope, func, producer, length, batch_size);

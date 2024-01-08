@@ -65,6 +65,11 @@ pub trait Producer: Send + Sized {
     /// number of items in producer
     fn len(&self) -> usize;
 
+    /// no items in producer
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// split producer into 2 Producers at position
     fn split_at(self, position: usize) -> (Self, Self);
 }
