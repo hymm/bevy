@@ -26,7 +26,7 @@ bevy_utils = { path = "../bevy_utils", version = "0.12.0-dev" }
 bevy_ptr = { path = "../bevy_ptr", version = "0.12.0-dev" }
 
 # other
-erased-serde = "0.3"
+erased-serde = "0.4"
 downcast-rs = "1.2"
 thiserror = "1.0"
 once_cell = "1.11"
