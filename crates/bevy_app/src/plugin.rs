@@ -1,6 +1,7 @@
+use bevy_ecs::{schedule::{InternedSystemSet, InternedScheduleLabel, ScheduleLabel, SystemConfigs, IntoSystemConfigs}, world::World};
 use downcast_rs::{impl_downcast, Downcast};
 
-use crate::App;
+use crate::{App, Update};
 use std::any::Any;
 
 /// A collection of Bevy app logic and configuration.
@@ -59,6 +60,63 @@ pub trait Plugin: Downcast + Any + Send + Sync {
 }
 
 impl_downcast!(Plugin);
+
+// /// A plugin that only acts an a certain world.
+// pub trait WorldPlugin {
+//     /// The sub app label of teh world that this plugin acts on. If this returns None it acts on the main schedule.
+//     fn world() -> Option<InternedAppLabel> {
+//         None
+//     }
+
+//     /// Configures the `World` this plugin belongs to.
+//     fn build(&self, _app: &mut World);
+// }
+
+// impl<T> Plugin for T
+// where
+//     T: WorldPlugin + Send + Sync + 'static,
+// {
+//     fn build(&self, app: &mut App) {
+//         self.build(&mut app.world);
+//     }
+// }
+
+/// a plugin that returns a system set. Scheduled into the configured
+/// sets by default, but can change that.
+pub trait SchedulablePlugin {
+    /// this is the default schedule the plugin is added to.
+    /// If None it is added to Update
+    fn default_schedule() -> Option<InternedScheduleLabel> {
+        None
+    }
+
+    /// this is the default system set the plugin is added to.
+    /// If None it is not added to any system set
+    fn default_system_set() -> Option<InternedSystemSet> {
+        None
+    }
+
+    /// set this to false if you only provide systems
+    fn is_unique(&self) -> bool {
+        true
+    }
+
+    fn build(&self, app: &mut App) -> SystemConfigs;
+}
+
+impl <T> Plugin for T
+where
+    T: SchedulablePlugin + Send + Sync + 'static,
+{
+    fn build(&self, app: &mut App) {
+        let mut systems = self.build(app);
+        if let Some(system_set) = Self::default_system_set() {
+            systems = systems.in_set(system_set);
+        }
+        let schedule = Self::default_schedule().unwrap_or(Update.intern());
+        app.add_systems(schedule, systems);
+    }
+}
 
 /// A type representing an unsafe function that returns a mutable pointer to a [`Plugin`].
 /// It is used for dynamically loading plugins.
@@ -125,4 +183,38 @@ mod sealed {
     }
 
     all_tuples!(impl_plugins_tuples, 0, 15, P, S);
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::schedule::{SystemSet, common_conditions::run_once};
+
+    use super::*;
+
+    #[test]
+    fn test_schedule_plugin() {
+        struct MyPlugin;
+        impl SchedulablePlugin for MyPlugin {
+            fn build(&self, _app: &mut crate::App) -> bevy_ecs::schedule::SystemConfigs {
+                // my_func.into_configs()
+                (|| {}).into_configs()
+            }
+        }
+
+        #[derive(SystemSet, Hash, PartialEq, Eq, Debug, Clone)]
+        struct MySystemSet;
+
+        let mut app = App::new();
+        // can add plugin normally
+        app.add_plugins(MyPlugin);
+
+        // can get the systems
+        let systems = SchedulablePlugin::build(&MyPlugin, &mut app);
+        app.add_systems(Update, systems.in_set(MySystemSet));
+
+        // can call it multiple times
+        // TODO: this is bad because we bypassed is_unique.
+        let systems = SchedulablePlugin::build(&MyPlugin, &mut app);
+        app.add_systems(Update, systems.run_if(run_once()));
+    }
 }

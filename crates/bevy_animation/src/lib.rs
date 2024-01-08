@@ -5,10 +5,13 @@
 use std::ops::Deref;
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, PostUpdate};
+use bevy_app::{App, Plugin, PostUpdate, SchedulablePlugin};
 use bevy_asset::{Asset, AssetApp, Assets, Handle};
 use bevy_core::Name;
-use bevy_ecs::prelude::*;
+use bevy_ecs::{
+    prelude::*,
+    schedule::{ScheduleLabel, SystemConfigs},
+};
 use bevy_hierarchy::{Children, Parent};
 use bevy_math::{Quat, Vec3};
 use bevy_reflect::Reflect;
@@ -889,14 +892,18 @@ fn update_transitions(player: &mut AnimationPlayer, time: &Time) {
 #[derive(Default)]
 pub struct AnimationPlugin;
 
-impl Plugin for AnimationPlugin {
-    fn build(&self, app: &mut App) {
+impl SchedulablePlugin for AnimationPlugin {
+    fn default_schedule() -> Option<bevy_ecs::schedule::InternedScheduleLabel> {
+        Some(PostUpdate.intern())
+    }
+
+    fn build(&self, app: &mut App) -> SystemConfigs {
         app.init_asset::<AnimationClip>()
             .register_asset_reflect::<AnimationClip>()
-            .register_type::<AnimationPlayer>()
-            .add_systems(
-                PostUpdate,
-                animation_player.before(TransformSystem::TransformPropagate),
-            );
+            .register_type::<AnimationPlayer>();
+
+        animation_player
+            .before(TransformSystem::TransformPropagate)
+            .into_configs()
     }
 }
