@@ -1,6 +1,8 @@
+use bevy_ecs::{schedule::ScheduleLabel, system::IntoSystem, world::World};
+use bevy_utils::intern::Interned;
 use downcast_rs::{impl_downcast, Downcast};
 
-use crate::App;
+use crate::{App, AppLabel};
 use std::any::Any;
 
 /// A collection of Bevy app logic and configuration.
@@ -59,6 +61,43 @@ pub trait Plugin: Downcast + Any + Send + Sync {
 }
 
 impl_downcast!(Plugin);
+
+/// [`WorldPlugin`] is a plugin that only acts on one world. Using this is preferred
+/// over [`AppPlugin`] when possible.
+pub trait WorldPlugin {
+    /// world to add the plugin to. If None it defaults to the main world.
+    fn world(&self) -> Option<Interned<dyn AppLabel>> {
+        None
+    }
+
+    /// add dependencies between systems.
+    fn dependencies<M>(&self, _system: impl IntoSystem<(), (), M>) {}
+
+    /// run methods on world to initialize plugin
+    /// this is run the first time app.update() is called.
+    fn build(&self, world: &mut World);
+}
+
+trait WorldPluginExt {
+    fn add_plugin(&mut self, plugin: impl WorldPlugin + Send + Sync + 'static);
+}
+
+impl WorldPluginExt for World {
+    fn add_plugin(&mut self, plugin: impl WorldPlugin + Send + Sync + 'static) {
+        let system = move |world: &mut World| {
+            plugin.build(world);
+        };
+
+        plugin.dependencies(system);
+
+        self.schedule_scope(PluginInit, |_world, schedule| {
+            schedule.add_systems(system);
+        });
+    }
+}
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct PluginInit;
 
 /// A type representing an unsafe function that returns a mutable pointer to a [`Plugin`].
 /// It is used for dynamically loading plugins.
