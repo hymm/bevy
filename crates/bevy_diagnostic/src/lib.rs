@@ -8,7 +8,8 @@ mod frame_time_diagnostics_plugin;
 mod log_diagnostics_plugin;
 mod system_information_diagnostics_plugin;
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldAppExt, WorldPlugin};
+use bevy_ecs::world::World;
 pub use diagnostic::*;
 pub use entity_count_diagnostics_plugin::EntityCountDiagnosticsPlugin;
 pub use frame_time_diagnostics_plugin::FrameTimeDiagnosticsPlugin;
@@ -19,9 +20,9 @@ pub use system_information_diagnostics_plugin::SystemInformationDiagnosticsPlugi
 #[derive(Default)]
 pub struct DiagnosticsPlugin;
 
-impl Plugin for DiagnosticsPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<DiagnosticsStore>().add_systems(
+impl WorldPlugin for DiagnosticsPlugin {
+    fn build(&self, world: &mut World) {
+        world.init_resource::<DiagnosticsStore>().add_systems(
             Startup,
             system_information_diagnostics_plugin::internal::log_system_info,
         );

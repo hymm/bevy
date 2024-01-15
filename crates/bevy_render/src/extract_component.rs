@@ -4,7 +4,7 @@ use crate::{
     view::ViewVisibility,
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, WorldAppExt, WorldPlugin};
 use bevy_asset::{Asset, Handle};
 use bevy_ecs::{
     component::Component,
@@ -12,6 +12,7 @@ use bevy_ecs::{
     query::{QueryFilter, QueryItem, ReadOnlyQueryData},
     system::lifetimeless::Read,
 };
+use bevy_utils::intern::Interned;
 use std::{marker::PhantomData, ops::Deref};
 
 pub use bevy_render_macros::ExtractComponent;
@@ -78,16 +79,18 @@ impl<C> Default for UniformComponentPlugin<C> {
     }
 }
 
-impl<C: Component + ShaderType + WriteInto + Clone> Plugin for UniformComponentPlugin<C> {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .insert_resource(ComponentUniforms::<C>::default())
-                .add_systems(
-                    Render,
-                    prepare_uniform_components::<C>.in_set(RenderSet::PrepareResources),
-                );
-        }
+impl<C: Component + ShaderType + WriteInto + Clone> WorldPlugin for UniformComponentPlugin<C> {
+    fn world(&self) -> Option<Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world
+            .insert_resource(ComponentUniforms::<C>::default())
+            .add_systems(
+                Render,
+                prepare_uniform_components::<C>.in_set(RenderSet::PrepareResources),
+            );
     }
 }
 
@@ -182,14 +185,16 @@ impl<C, F> ExtractComponentPlugin<C, F> {
     }
 }
 
-impl<C: ExtractComponent> Plugin for ExtractComponentPlugin<C> {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            if self.only_extract_visible {
-                render_app.add_systems(ExtractSchedule, extract_visible_components::<C>);
-            } else {
-                render_app.add_systems(ExtractSchedule, extract_components::<C>);
-            }
+impl<C: ExtractComponent> WorldPlugin for ExtractComponentPlugin<C> {
+    fn world(&self) -> Option<Interned<dyn AppLabel>> {
+        None
+    }
+
+    fn build(&self, world: &mut World) {
+        if self.only_extract_visible {
+            world.add_systems(ExtractSchedule, extract_visible_components::<C>);
+        } else {
+            world.add_systems(ExtractSchedule, extract_components::<C>);
         }
     }
 }

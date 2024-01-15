@@ -2,6 +2,8 @@ use std::marker::PhantomData;
 
 #[cfg(feature = "bevy_app")]
 use crate::Parent;
+#[cfg(feature = "bevy_app")]
+use bevy_app::WorldAppExt;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "bevy_app")]
 use bevy_utils::{get_short_name, HashSet};
@@ -94,9 +96,9 @@ impl<T: Component> Default for ValidParentCheckPlugin<T> {
 }
 
 #[cfg(feature = "bevy_app")]
-impl<T: Component> bevy_app::Plugin for ValidParentCheckPlugin<T> {
-    fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<ReportHierarchyIssue<T>>().add_systems(
+impl<T: Component> bevy_app::WorldPlugin for ValidParentCheckPlugin<T> {
+    fn build(&self, world: &mut bevy_ecs::world::World) {
+        world.init_resource::<ReportHierarchyIssue<T>>().add_systems(
             bevy_app::Last,
             check_hierarchy_component_has_valid_parent::<T>
                 .run_if(resource_equals(ReportHierarchyIssue::<T>::new(true))),

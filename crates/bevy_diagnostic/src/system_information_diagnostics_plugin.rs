@@ -1,5 +1,6 @@
 use crate::DiagnosticId;
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
+use bevy_ecs::world::World;
 
 /// Adds a System Information Diagnostic, specifically `cpu_usage` (in %) and `mem_usage` (in %)
 ///
@@ -16,9 +17,9 @@ use bevy_app::prelude::*;
 /// [`LogDiagnosticsPlugin`](crate::LogDiagnosticsPlugin) to output diagnostics to the console.
 #[derive(Default)]
 pub struct SystemInformationDiagnosticsPlugin;
-impl Plugin for SystemInformationDiagnosticsPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, internal::setup_system)
+impl WorldPlugin for SystemInformationDiagnosticsPlugin {
+    fn build(&self, world: &mut World) {
+        world.add_systems(Startup, internal::setup_system)
             .add_systems(Update, internal::diagnostic_system);
     }
 }

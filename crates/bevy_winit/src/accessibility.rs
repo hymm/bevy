@@ -13,13 +13,13 @@ use bevy_a11y::{
     AccessibilityNode, AccessibilityRequested, AccessibilitySystem, Focus,
 };
 use bevy_a11y::{ActionRequest as ActionRequestWrapper, ManageAccessibilityUpdates};
-use bevy_app::{App, Plugin, PostUpdate};
+use bevy_app::{App, Plugin, PostUpdate, WorldPlugin, WorldAppExt};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{DetectChanges, Entity, EventReader, EventWriter},
     query::With,
     schedule::IntoSystemConfigs,
-    system::{NonSend, NonSendMut, Query, Res, ResMut, Resource},
+    system::{NonSend, NonSendMut, Query, Res, ResMut, Resource}, world::World,
 };
 use bevy_hierarchy::{Children, Parent};
 use bevy_utils::EntityHashMap;
@@ -180,9 +180,9 @@ fn add_children_nodes(
 /// Implements winit-specific `AccessKit` functionality.
 pub struct AccessKitPlugin;
 
-impl Plugin for AccessKitPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_non_send_resource::<AccessKitAdapters>()
+impl WorldPlugin for AccessKitPlugin {
+    fn build(&self, world: &mut World) {
+        world.init_non_send_resource::<AccessKitAdapters>()
             .init_resource::<WinitActionHandlers>()
             .add_event::<ActionRequestWrapper>()
             .add_systems(

@@ -1,5 +1,5 @@
 use super::{Diagnostic, DiagnosticId, DiagnosticsStore};
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
 use bevy_ecs::prelude::*;
 use bevy_log::{debug, info};
 use bevy_time::{Real, Time, Timer, TimerMode};
@@ -35,17 +35,17 @@ impl Default for LogDiagnosticsPlugin {
     }
 }
 
-impl Plugin for LogDiagnosticsPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(LogDiagnosticsState {
+impl WorldPlugin for LogDiagnosticsPlugin {
+    fn build(&self, world: &mut World) {
+        world.insert_resource(LogDiagnosticsState {
             timer: Timer::new(self.wait_duration, TimerMode::Repeating),
             filter: self.filter.clone(),
         });
 
         if self.debug {
-            app.add_systems(PostUpdate, Self::log_diagnostics_debug_system);
+            world.add_systems(PostUpdate, Self::log_diagnostics_debug_system);
         } else {
-            app.add_systems(PostUpdate, Self::log_diagnostics_system);
+            world.add_systems(PostUpdate, Self::log_diagnostics_system);
         }
     }
 }

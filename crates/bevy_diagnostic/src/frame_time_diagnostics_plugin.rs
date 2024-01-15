@@ -1,5 +1,5 @@
 use crate::{Diagnostic, DiagnosticId, Diagnostics, RegisterDiagnostic};
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
 use bevy_core::FrameCount;
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time};
@@ -12,9 +12,9 @@ use bevy_time::{Real, Time};
 #[derive(Default)]
 pub struct FrameTimeDiagnosticsPlugin;
 
-impl Plugin for FrameTimeDiagnosticsPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_diagnostic(
+impl WorldPlugin for FrameTimeDiagnosticsPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_diagnostic(
             Diagnostic::new(Self::FRAME_TIME, "frame_time", 20).with_suffix("ms"),
         )
         .register_diagnostic(Diagnostic::new(Self::FPS, "fps", 20))

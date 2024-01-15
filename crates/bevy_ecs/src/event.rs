@@ -1102,7 +1102,7 @@ mod tests {
         use bevy_ecs::prelude::*;
 
         let mut world = World::new();
-        world.init_resource::<Events<TestEvent>>();
+        world.init_resource_inner::<Events<TestEvent>>();
 
         world.send_event(TestEvent { i: 0 });
         world.send_event(TestEvent { i: 1 });
@@ -1128,7 +1128,7 @@ mod tests {
         use bevy_ecs::prelude::*;
 
         let mut world = World::new();
-        world.init_resource::<Events<TestEvent>>();
+        world.init_resource_inner::<Events<TestEvent>>();
 
         let mut reader =
             IntoSystem::into_system(|mut events: EventReader<TestEvent>| -> Option<TestEvent> {

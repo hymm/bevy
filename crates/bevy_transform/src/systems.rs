@@ -180,7 +180,7 @@ unsafe fn propagate_recursive(
 
 #[cfg(test)]
 mod test {
-    use bevy_app::prelude::*;
+    use bevy_app::{prelude::*, WorldAppExt};
     use bevy_ecs::prelude::*;
     use bevy_ecs::system::CommandQueue;
     use bevy_math::{vec3, Vec3};
@@ -406,7 +406,7 @@ mod test {
         let mut app = App::new();
         ComputeTaskPool::get_or_init(TaskPool::default);
 
-        app.add_systems(Update, (sync_simple_transforms, propagate_transforms));
+        app.world.add_systems(Update, (sync_simple_transforms, propagate_transforms));
 
         let translation = vec3(1.0, 0.0, 0.0);
 
@@ -452,7 +452,7 @@ mod test {
         let mut temp = World::new();
         let mut app = App::new();
 
-        app.add_systems(Update, (propagate_transforms, sync_simple_transforms));
+        app.world.add_systems(Update, (propagate_transforms, sync_simple_transforms));
 
         fn setup_world(world: &mut World) -> (Entity, Entity) {
             let mut grandchild = Entity::from_raw(0);

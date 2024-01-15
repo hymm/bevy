@@ -7,6 +7,7 @@
 //! is part of the [`DefaultPlugins`](https://docs.rs/bevy/latest/bevy/struct.DefaultPlugins.html).
 
 use bevy_a11y::Focus;
+use bevy_ecs::world::World;
 
 mod cursor;
 mod event;
@@ -31,7 +32,7 @@ pub mod prelude {
     };
 }
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
 use std::path::PathBuf;
 
 impl Default for WindowPlugin {
@@ -78,10 +79,10 @@ pub struct WindowPlugin {
     pub close_when_requested: bool,
 }
 
-impl Plugin for WindowPlugin {
-    fn build(&self, app: &mut App) {
+impl WorldPlugin for WindowPlugin {
+    fn build(&self, world: &mut World) {
         // User convenience events
-        app.add_event::<WindowResized>()
+        world.add_event::<WindowResized>()
             .add_event::<WindowCreated>()
             .add_event::<WindowClosed>()
             .add_event::<WindowCloseRequested>()
@@ -102,33 +103,32 @@ impl Plugin for WindowPlugin {
             .add_event::<ApplicationLifetime>();
 
         if let Some(primary_window) = &self.primary_window {
-            let initial_focus = app
-                .world
+            let initial_focus = world
                 .spawn(primary_window.clone())
                 .insert(PrimaryWindow)
                 .id();
-            if let Some(mut focus) = app.world.get_resource_mut::<Focus>() {
+            if let Some(mut focus) = world.get_resource_mut::<Focus>() {
                 **focus = Some(initial_focus);
             }
         }
 
         match self.exit_condition {
             ExitCondition::OnPrimaryClosed => {
-                app.add_systems(PostUpdate, exit_on_primary_closed);
+                world.add_systems(PostUpdate, exit_on_primary_closed);
             }
             ExitCondition::OnAllClosed => {
-                app.add_systems(PostUpdate, exit_on_all_closed);
+                world.add_systems(PostUpdate, exit_on_all_closed);
             }
             ExitCondition::DontExit => {}
         }
 
         if self.close_when_requested {
             // Need to run before `exit_on_*` systems
-            app.add_systems(Update, close_when_requested);
+            world.add_systems(Update, close_when_requested);
         }
 
         // Register event types
-        app.register_type::<WindowResized>()
+        world.register_type::<WindowResized>()
             .register_type::<RequestRedraw>()
             .register_type::<WindowCreated>()
             .register_type::<WindowCloseRequested>()
@@ -147,7 +147,7 @@ impl Plugin for WindowPlugin {
             .register_type::<ApplicationLifetime>();
 
         // Register window descriptor and related types
-        app.register_type::<Window>()
+        world.register_type::<Window>()
             .register_type::<PrimaryWindow>()
             .register_type::<Cursor>()
             .register_type::<CursorIcon>()
@@ -165,7 +165,7 @@ impl Plugin for WindowPlugin {
             .register_type::<EnabledButtons>();
 
         // Register `PathBuf` as it's used by `FileDragAndDrop`
-        app.register_type::<PathBuf>();
+        world.register_type::<PathBuf>();
     }
 }
 

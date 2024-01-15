@@ -1,5 +1,4 @@
-use bevy_app::App;
-use bevy_ecs::system::{Deferred, Res, Resource, SystemBuffer, SystemParam};
+use bevy_ecs::{system::{Deferred, Res, Resource, SystemBuffer, SystemParam}, world::World};
 use bevy_log::warn;
 use bevy_utils::{Duration, Instant, StableHashMap, Uuid};
 use std::{borrow::Cow, collections::VecDeque};
@@ -291,7 +290,7 @@ pub trait RegisterDiagnostic {
     fn register_diagnostic(&mut self, diagnostic: Diagnostic) -> &mut Self;
 }
 
-impl RegisterDiagnostic for App {
+impl RegisterDiagnostic for World {
     /// Register a new [`Diagnostic`] with an [`App`].
     ///
     /// Will initialize a [`DiagnosticsStore`] if it doesn't exist.
@@ -309,7 +308,7 @@ impl RegisterDiagnostic for App {
     /// ```
     fn register_diagnostic(&mut self, diagnostic: Diagnostic) -> &mut Self {
         self.init_resource::<DiagnosticsStore>();
-        let mut diagnostics = self.world.resource_mut::<DiagnosticsStore>();
+        let mut diagnostics = self.resource_mut::<DiagnosticsStore>();
         diagnostics.add(diagnostic);
 
         self

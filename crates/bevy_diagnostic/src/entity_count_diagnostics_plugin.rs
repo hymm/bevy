@@ -1,5 +1,5 @@
-use bevy_app::prelude::*;
-use bevy_ecs::entity::Entities;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
+use bevy_ecs::{entity::Entities, world::World};
 
 use crate::{Diagnostic, DiagnosticId, Diagnostics, RegisterDiagnostic};
 
@@ -11,9 +11,9 @@ use crate::{Diagnostic, DiagnosticId, Diagnostics, RegisterDiagnostic};
 #[derive(Default)]
 pub struct EntityCountDiagnosticsPlugin;
 
-impl Plugin for EntityCountDiagnosticsPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_diagnostic(Diagnostic::new(Self::ENTITY_COUNT, "entity_count", 20))
+impl WorldPlugin for EntityCountDiagnosticsPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_diagnostic(Diagnostic::new(Self::ENTITY_COUNT, "entity_count", 20))
             .add_systems(Update, Self::diagnostic_system);
     }
 }

@@ -204,7 +204,7 @@ mod tests {
 
         // First, we create a simple world with a parent and a child relationship
         let mut world = World::new();
-        world.init_resource::<AppTypeRegistry>();
+        world.init_resource_inner::<AppTypeRegistry>();
         world
             .resource_mut::<AppTypeRegistry>()
             .write()

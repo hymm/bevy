@@ -3,7 +3,7 @@ mod render_layers;
 use bevy_derive::Deref;
 pub use render_layers::*;
 
-use bevy_app::{Plugin, PostUpdate};
+use bevy_app::{Plugin, PostUpdate, WorldPlugin, WorldAppExt};
 use bevy_asset::{Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::{Children, Parent};
@@ -208,11 +208,11 @@ pub enum VisibilitySystems {
 
 pub struct VisibilityPlugin;
 
-impl Plugin for VisibilityPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
+impl WorldPlugin for VisibilityPlugin {
+    fn build(&self, world: &mut World) {
         use VisibilitySystems::*;
 
-        app.add_systems(
+        world.add_systems(
             PostUpdate,
             (
                 calculate_bounds.in_set(CalculateBounds),
@@ -464,7 +464,7 @@ pub fn check_visibility(
 
 #[cfg(test)]
 mod test {
-    use bevy_app::prelude::*;
+    use bevy_app::{prelude::*, WorldAppExt};
     use bevy_ecs::prelude::*;
 
     use super::*;
@@ -481,7 +481,7 @@ mod test {
     #[test]
     fn visibility_propagation() {
         let mut app = App::new();
-        app.add_systems(Update, visibility_propagate_system);
+        app.world.add_systems(Update, visibility_propagate_system);
 
         let root1 = app.world.spawn(visibility_bundle(Visibility::Hidden)).id();
         let root1_child1 = app.world.spawn(VisibilityBundle::default()).id();
@@ -572,7 +572,7 @@ mod test {
         use Visibility::{Hidden, Inherited, Visible};
 
         let mut app = App::new();
-        app.add_systems(Update, visibility_propagate_system);
+        app.world.add_systems(Update, visibility_propagate_system);
 
         let root1 = app.world.spawn(visibility_bundle(Visible)).id();
         let root1_child1 = app.world.spawn(visibility_bundle(Inherited)).id();

@@ -1,10 +1,11 @@
 use crate::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSet};
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, WorldAppExt, WorldPlugin};
 use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
 use bevy_ecs::{
     prelude::{Commands, EventReader, IntoSystemConfigs, ResMut, Resource},
     schedule::SystemConfigs,
     system::{StaticSystemParam, SystemParam, SystemParamItem, SystemState},
+    world::World,
 };
 use bevy_reflect::Reflect;
 use bevy_utils::{thiserror::Error, HashMap, HashSet};
@@ -84,38 +85,37 @@ impl<A: RenderAsset, AFTER: RenderAssetDependency + 'static> Default
     }
 }
 
-impl<A: RenderAsset, AFTER: RenderAssetDependency + 'static> Plugin
+impl<A: RenderAsset, AFTER: RenderAssetDependency + 'static> WorldPlugin
     for RenderAssetPlugin<A, AFTER>
 {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .init_resource::<ExtractedAssets<A>>()
-                .init_resource::<RenderAssets<A>>()
-                .init_resource::<PrepareNextFrameAssets<A>>()
-                .add_systems(ExtractSchedule, extract_render_asset::<A>);
-            AFTER::register_system(
-                render_app,
-                prepare_assets::<A>.in_set(RenderSet::PrepareAssets),
-            );
-        }
+    fn world(&self) -> Option<bevy_utils::intern::Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world
+            .init_resource::<ExtractedAssets<A>>()
+            .init_resource::<RenderAssets<A>>()
+            .init_resource::<PrepareNextFrameAssets<A>>()
+            .add_systems(ExtractSchedule, extract_render_asset::<A>);
+        AFTER::register_system(world, prepare_assets::<A>.in_set(RenderSet::PrepareAssets));
     }
 }
 
 // helper to allow specifying dependencies between render assets
 pub trait RenderAssetDependency {
-    fn register_system(render_app: &mut App, system: SystemConfigs);
+    fn register_system(render_world: &mut World, system: SystemConfigs);
 }
 
 impl RenderAssetDependency for () {
-    fn register_system(render_app: &mut App, system: SystemConfigs) {
-        render_app.add_systems(Render, system);
+    fn register_system(render_world: &mut World, system: SystemConfigs) {
+        render_world.add_systems(Render, system);
     }
 }
 
 impl<A: RenderAsset> RenderAssetDependency for A {
-    fn register_system(render_app: &mut App, system: SystemConfigs) {
-        render_app.add_systems(Render, system.after(prepare_assets::<A>));
+    fn register_system(render_world: &mut World, system: SystemConfigs) {
+        render_world.add_systems(Render, system.after(prepare_assets::<A>));
     }
 }
 

@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn extract_entity_order() {
         let mut world = World::default();
-        world.init_resource::<AppTypeRegistry>();
+        world.init_resource_inner::<AppTypeRegistry>();
 
         // Spawn entities in order
         let entity_a = world.spawn_empty().id();

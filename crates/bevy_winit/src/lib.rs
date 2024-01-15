@@ -18,7 +18,7 @@ use system::{changed_windows, create_windows, despawn_windows, CachedWindow};
 pub use winit_config::*;
 pub use winit_windows::*;
 
-use bevy_app::{App, AppExit, Last, Plugin, PluginsState};
+use bevy_app::{App, AppExit, Last, Plugin, PluginsState, WorldAppExt, WorldPluginHolder};
 use bevy_ecs::event::{Events, ManualEventReader};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{SystemParam, SystemState};
@@ -123,9 +123,10 @@ impl Plugin for WinitPlugin {
             );
         }
 
-        app.init_non_send_resource::<WinitWindows>()
+        app.set_runner(winit_runner);
+        app.world
+            .init_non_send_resource::<WinitWindows>()
             .init_resource::<WinitSettings>()
-            .set_runner(winit_runner)
             .add_systems(
                 Last,
                 (
@@ -137,7 +138,7 @@ impl Plugin for WinitPlugin {
                     .chain(),
             );
 
-        app.add_plugins(AccessKitPlugin);
+        app.add_plugins(WorldPluginHolder::from(AccessKitPlugin));
 
         let event_loop = event_loop_builder
             .build()

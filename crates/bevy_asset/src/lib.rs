@@ -42,12 +42,12 @@ use crate::{
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
     processor::{AssetProcessor, Process},
 };
-use bevy_app::{App, First, MainScheduleOrder, Plugin, PostUpdate};
+use bevy_app::{First, MainScheduleOrder, PostUpdate, WorldAppExt, WorldPlugin};
 use bevy_ecs::{
     reflect::AppTypeRegistry,
     schedule::{IntoSystemConfigs, IntoSystemSetConfigs, ScheduleLabel, SystemSet},
     system::Resource,
-    world::FromWorld,
+    world::{FromWorld, World},
 };
 use bevy_log::error;
 use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath};
@@ -140,14 +140,13 @@ impl AssetPlugin {
     const DEFAULT_PROCESSED_FILE_PATH: &'static str = "imported_assets/Default";
 }
 
-impl Plugin for AssetPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_schedule(UpdateAssets).init_schedule(AssetEvents);
+impl WorldPlugin for AssetPlugin {
+    fn build(&self, world: &mut World) {
+        world.init_schedule(UpdateAssets).init_schedule(AssetEvents);
         let embedded = EmbeddedAssetRegistry::default();
         {
-            let mut sources = app
-                .world
-                .get_resource_or_insert_with::<AssetSourceBuilders>(Default::default);
+            let mut sources =
+                world.get_resource_or_insert_with::<AssetSourceBuilders>(Default::default);
             sources.init_default_source(
                 &self.file_path,
                 (!matches!(self.mode, AssetMode::Unprocessed))
@@ -162,15 +161,14 @@ impl Plugin for AssetPlugin {
             }
             match self.mode {
                 AssetMode::Unprocessed => {
-                    let mut builders = app.world.resource_mut::<AssetSourceBuilders>();
+                    let mut builders = world.resource_mut::<AssetSourceBuilders>();
                     let sources = builders.build_sources(watch, false);
-                    let meta_check = app
-                        .world
+                    let meta_check = world
                         .get_resource::<AssetMetaCheck>()
                         .cloned()
                         .unwrap_or_else(AssetMetaCheck::default);
 
-                    app.insert_resource(AssetServer::new_with_meta_check(
+                    world.insert_resource(AssetServer::new_with_meta_check(
                         sources,
                         AssetServerMode::Unprocessed,
                         meta_check,
@@ -197,9 +195,9 @@ impl Plugin for AssetPlugin {
                     }
                     #[cfg(not(feature = "asset_processor"))]
                     {
-                        let mut builders = app.world.resource_mut::<AssetSourceBuilders>();
+                        let mut builders = world.resource_mut::<AssetSourceBuilders>();
                         let sources = builders.build_sources(false, watch);
-                        app.insert_resource(AssetServer::new_with_meta_check(
+                        world.insert_resource(AssetServer::new_with_meta_check(
                             sources,
                             AssetServerMode::Processed,
                             AssetMetaCheck::Always,
@@ -209,7 +207,8 @@ impl Plugin for AssetPlugin {
                 }
             }
         }
-        app.insert_resource(embedded)
+        world
+            .insert_resource(embedded)
             .init_asset::<LoadedFolder>()
             .init_asset::<LoadedUntypedAsset>()
             .init_asset::<()>()
@@ -219,7 +218,7 @@ impl Plugin for AssetPlugin {
             )
             .add_systems(UpdateAssets, handle_internal_asset_events);
 
-        let mut order = app.world.resource_mut::<MainScheduleOrder>();
+        let mut order = world.resource_mut::<MainScheduleOrder>();
         order.insert_after(First, UpdateAssets);
         order.insert_after(PostUpdate, AssetEvents);
     }
@@ -314,14 +313,14 @@ pub trait AssetApp {
     fn preregister_asset_loader<L: AssetLoader>(&mut self, extensions: &[&str]) -> &mut Self;
 }
 
-impl AssetApp for App {
+impl AssetApp for World {
     fn register_asset_loader<L: AssetLoader>(&mut self, loader: L) -> &mut Self {
-        self.world.resource::<AssetServer>().register_loader(loader);
+        self.resource::<AssetServer>().register_loader(loader);
         self
     }
 
     fn register_asset_processor<P: Process>(&mut self, processor: P) -> &mut Self {
-        if let Some(asset_processor) = self.world.get_resource::<AssetProcessor>() {
+        if let Some(asset_processor) = self.get_resource::<AssetProcessor>() {
             asset_processor.register_processor(processor);
         }
         self
@@ -333,14 +332,12 @@ impl AssetApp for App {
         source: AssetSourceBuilder,
     ) -> &mut Self {
         let id = id.into();
-        if self.world.get_resource::<AssetServer>().is_some() {
+        if self.get_resource::<AssetServer>().is_some() {
             error!("{} must be registered before `AssetPlugin` (typically added as part of `DefaultPlugins`)", id);
         }
 
         {
-            let mut sources = self
-                .world
-                .get_resource_or_insert_with(AssetSourceBuilders::default);
+            let mut sources = self.get_resource_or_insert_with(AssetSourceBuilders::default);
             sources.insert(id, source);
         }
 
@@ -348,22 +345,22 @@ impl AssetApp for App {
     }
 
     fn set_default_asset_processor<P: Process>(&mut self, extension: &str) -> &mut Self {
-        if let Some(asset_processor) = self.world.get_resource::<AssetProcessor>() {
+        if let Some(asset_processor) = self.get_resource::<AssetProcessor>() {
             asset_processor.set_default_processor::<P>(extension);
         }
         self
     }
 
     fn init_asset_loader<L: AssetLoader + FromWorld>(&mut self) -> &mut Self {
-        let loader = L::from_world(&mut self.world);
+        let loader = L::from_world(self);
         self.register_asset_loader(loader)
     }
 
     fn init_asset<A: Asset>(&mut self) -> &mut Self {
         let assets = Assets::<A>::default();
-        self.world.resource::<AssetServer>().register_asset(&assets);
-        if self.world.contains_resource::<AssetProcessor>() {
-            let processor = self.world.resource::<AssetProcessor>();
+        self.resource::<AssetServer>().register_asset(&assets);
+        if self.contains_resource::<AssetProcessor>() {
+            let processor = self.resource::<AssetProcessor>();
             // The processor should have its own handle provider separate from the Asset storage
             // to ensure the id spaces are entirely separate. Not _strictly_ necessary, but
             // desirable.
@@ -387,7 +384,7 @@ impl AssetApp for App {
     where
         A: Asset + Reflect + FromReflect + GetTypeRegistration,
     {
-        let type_registry = self.world.resource::<AppTypeRegistry>();
+        let type_registry = self.resource::<AppTypeRegistry>();
         {
             let mut type_registry = type_registry.write();
 
@@ -401,8 +398,7 @@ impl AssetApp for App {
     }
 
     fn preregister_asset_loader<L: AssetLoader>(&mut self, extensions: &[&str]) -> &mut Self {
-        self.world
-            .resource_mut::<AssetServer>()
+        self.resource_mut::<AssetServer>()
             .preregister_loader::<L>(extensions);
         self
     }
@@ -437,7 +433,7 @@ mod tests {
         Asset, AssetApp, AssetEvent, AssetId, AssetPath, AssetPlugin, AssetServer, Assets,
         DependencyLoadState, LoadState, RecursiveDependencyLoadState,
     };
-    use bevy_app::{App, Update};
+    use bevy_app::{App, Update, WorldAppExt, WorldPluginHolder};
     use bevy_core::TaskPoolPlugin;
     use bevy_ecs::prelude::*;
     use bevy_ecs::{
@@ -540,15 +536,15 @@ mod tests {
     fn test_app(dir: Dir) -> (App, GateOpener) {
         let mut app = App::new();
         let (gated_memory_reader, gate_opener) = GatedReader::new(MemoryAssetReader { root: dir });
-        app.register_asset_source(
+        app.add_plugins((
+            WorldPluginHolder::from(TaskPoolPlugin::default()),
+            LogPlugin::default(),
+            WorldPluginHolder::from(AssetPlugin::default()),
+        ));
+        app.world.register_asset_source(
             AssetSourceId::Default,
             AssetSource::build().with_reader(move || Box::new(gated_memory_reader.clone())),
-        )
-        .add_plugins((
-            TaskPoolPlugin::default(),
-            LogPlugin::default(),
-            AssetPlugin::default(),
-        ));
+        );
         (app, gate_opener)
     }
 
@@ -636,7 +632,8 @@ mod tests {
         }
 
         let (mut app, gate_opener) = test_app(dir);
-        app.init_asset::<CoolText>()
+        app.world
+            .init_asset::<CoolText>()
             .init_asset::<SubText>()
             .init_resource::<StoredEvents>()
             .register_asset_loader(CoolTextLoader)
@@ -947,7 +944,8 @@ mod tests {
         dir.insert_asset_text(Path::new(d_path), d_ron);
 
         let (mut app, gate_opener) = test_app(dir);
-        app.init_asset::<CoolText>()
+        app.world
+            .init_asset::<CoolText>()
             .register_asset_loader(CoolTextLoader);
         let asset_server = app.world.resource::<AssetServer>().clone();
         let handle: Handle<CoolText> = asset_server.load(a_path);
@@ -1031,7 +1029,8 @@ mod tests {
         dir.insert_asset_text(Path::new(dep_path), dep_ron);
 
         let (mut app, gate_opener) = test_app(dir);
-        app.init_asset::<CoolText>()
+        app.world
+            .init_asset::<CoolText>()
             .init_asset::<SubText>()
             .init_resource::<StoredEvents>()
             .register_asset_loader(CoolTextLoader)
@@ -1157,7 +1156,8 @@ mod tests {
         dir.insert_asset_text(Path::new(c_path), c_ron);
 
         let (mut app, gate_opener) = test_app(dir);
-        app.init_asset::<CoolText>()
+        app.world
+            .init_asset::<CoolText>()
             .init_asset::<SubText>()
             .register_asset_loader(CoolTextLoader);
         let asset_server = app.world.resource::<AssetServer>().clone();
@@ -1213,11 +1213,12 @@ mod tests {
     #[test]
     fn ignore_system_ambiguities_on_assets() {
         let mut app = App::new();
-        app.add_plugins(AssetPlugin::default())
+        app.add_plugins(WorldPluginHolder::from(AssetPlugin::default()));
+        app.world
             .init_asset::<CoolText>();
 
         fn uses_assets(_asset: ResMut<Assets<CoolText>>) {}
-        app.add_systems(Update, (uses_assets, uses_assets));
+        app.world.add_systems(Update, (uses_assets, uses_assets));
         app.edit_schedule(Update, |s| {
             s.set_build_settings(ScheduleBuildSettings {
                 ambiguity_detection: LogLevel::Error,

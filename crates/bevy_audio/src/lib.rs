@@ -47,7 +47,7 @@ pub use rodio::source::Source;
 pub use rodio::Sample;
 pub use sinks::*;
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
 use bevy_asset::{Asset, AssetApp};
 use bevy_ecs::prelude::*;
 use bevy_transform::TransformSystem;
@@ -70,9 +70,9 @@ pub struct AudioPlugin {
     pub spatial_scale: SpatialScale,
 }
 
-impl Plugin for AudioPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_type::<Volume>()
+impl WorldPlugin for AudioPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_type::<Volume>()
             .register_type::<GlobalVolume>()
             .register_type::<SpatialListener>()
             .register_type::<SpatialScale>()
@@ -94,15 +94,15 @@ impl Plugin for AudioPlugin {
 
         #[cfg(any(feature = "mp3", feature = "flac", feature = "wav", feature = "vorbis"))]
         {
-            app.add_audio_source::<AudioSource>();
-            app.init_asset_loader::<AudioLoader>();
+            world.add_audio_source::<AudioSource>();
+            world.init_asset_loader::<AudioLoader>();
         }
 
-        app.add_audio_source::<Pitch>();
+        world.add_audio_source::<Pitch>();
     }
 }
 
-impl AddAudioSource for App {
+impl AddAudioSource for World {
     fn add_audio_source<T>(&mut self) -> &mut Self
     where
         T: Decodable + Asset,

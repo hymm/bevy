@@ -401,8 +401,8 @@ mod tests {
         }
 
         let mut world = World::new();
-        world.init_resource::<ChangeDetector>();
-        world.init_resource::<Counter>();
+        world.init_resource_inner::<ChangeDetector>();
+        world.init_resource_inner::<Counter>();
         assert_eq!(*world.resource::<Counter>(), Counter(0));
         // Resources are changed when they are first added.
         let id = world.register_system(count_up_iff_changed);

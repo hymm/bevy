@@ -19,7 +19,7 @@ use crate::{
     texture::{BevyDefault, CachedTexture, ColorAttachment, DepthAttachment, TextureCache},
     Render, RenderApp, RenderSet,
 };
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, PluginGroup, WorldAppExt, WorldPlugin, WorldPluginHolder, WorldPluginExt, AppLabel};
 use bevy_ecs::prelude::*;
 use bevy_math::{Mat4, UVec4, Vec3, Vec4, Vec4Swizzles};
 use bevy_reflect::Reflect;
@@ -36,13 +36,23 @@ use wgpu::{
 
 pub const VIEW_TYPE_HANDLE: Handle<Shader> = Handle::weak_from_u128(15421373904451797197);
 
+pub struct ViewPlugins;
+impl PluginGroup for ViewPlugins {
+    fn build(self) -> bevy_app::PluginGroupBuilder {
+        self.build()
+            .add(WorldPluginHolder::from(ViewPlugin))
+            .add(WorldPluginHolder::from(ViewRenderPlugin))
+    }
+}
+
 pub struct ViewPlugin;
 
-impl Plugin for ViewPlugin {
-    fn build(&self, app: &mut App) {
-        load_internal_asset!(app, VIEW_TYPE_HANDLE, "view.wgsl", Shader::from_wgsl);
+impl WorldPlugin for ViewPlugin {
+    fn build(&self, world: &mut World) {
+        load_internal_asset!(world, VIEW_TYPE_HANDLE, "view.wgsl", Shader::from_wgsl);
 
-        app.register_type::<InheritedVisibility>()
+        world
+            .register_type::<InheritedVisibility>()
             .register_type::<ViewVisibility>()
             .register_type::<Msaa>()
             .register_type::<NoFrustumCulling>()
@@ -52,10 +62,21 @@ impl Plugin for ViewPlugin {
             .register_type::<ColorGrading>()
             .init_resource::<Msaa>()
             // NOTE: windows.is_changed() handles cases where a window was resized
-            .add_plugins((ExtractResourcePlugin::<Msaa>::default(), VisibilityPlugin));
+            .add_plugin(VisibilityPlugin);
+    }
+}
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<ViewUniforms>().add_systems(
+pub struct ViewRenderPlugin;
+impl WorldPlugin for ViewRenderPlugin {
+    fn world(&self) -> Option<bevy_utils::intern::Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world
+            .add_plugin(ExtractResourcePlugin::<Msaa>::default())
+            .init_resource::<ViewUniforms>()
+            .add_systems(
                 Render,
                 (
                     prepare_view_targets
@@ -66,7 +87,6 @@ impl Plugin for ViewPlugin {
                     prepare_view_uniforms.in_set(RenderSet::PrepareResources),
                 ),
             );
-        }
     }
 }
 

@@ -7,6 +7,7 @@ mod main_schedule;
 mod plugin;
 mod plugin_group;
 mod schedule_runner;
+mod world_ext;
 
 #[cfg(feature = "bevy_ci_testing")]
 pub mod ci_testing;
@@ -17,6 +18,7 @@ pub use main_schedule::*;
 pub use plugin::*;
 pub use plugin_group::*;
 pub use schedule_runner::*;
+pub use world_ext::*;
 
 #[allow(missing_docs)]
 pub mod prelude {

@@ -3,11 +3,11 @@ use crate::{
     renderer::{RenderDevice, RenderQueue},
     Render, RenderApp, RenderSet,
 };
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, WorldPlugin, WorldAppExt};
 use bevy_ecs::{
     prelude::{Component, Entity},
     schedule::IntoSystemConfigs,
-    system::{Commands, Query, Res, ResMut},
+    system::{Commands, Query, Res, ResMut}, world::World,
 };
 use std::marker::PhantomData;
 
@@ -15,22 +15,20 @@ use std::marker::PhantomData;
 /// by storing them in a [`GpuArrayBuffer`].
 pub struct GpuComponentArrayBufferPlugin<C: Component + GpuArrayBufferable>(PhantomData<C>);
 
-impl<C: Component + GpuArrayBufferable> Plugin for GpuComponentArrayBufferPlugin<C> {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(
-                Render,
-                prepare_gpu_component_array_buffers::<C>.in_set(RenderSet::PrepareResources),
-            );
-        }
+impl<C: Component + GpuArrayBufferable> WorldPlugin for GpuComponentArrayBufferPlugin<C> {
+    fn world(&self) -> Option<bevy_utils::intern::Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
     }
 
-    fn finish(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(GpuArrayBuffer::<C>::new(
-                render_app.world.resource::<RenderDevice>(),
-            ));
-        }
+    fn build(&self, world: &mut World) {
+        world.add_systems(
+            Render,
+            prepare_gpu_component_array_buffers::<C>.in_set(RenderSet::PrepareResources),
+        );
+
+        world.insert_resource(GpuArrayBuffer::<C>::new(
+            world.resource::<RenderDevice>(),
+        ));
     }
 }
 

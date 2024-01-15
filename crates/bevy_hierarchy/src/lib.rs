@@ -75,7 +75,9 @@ pub mod prelude {
 }
 
 #[cfg(feature = "bevy_app")]
-use bevy_app::prelude::*;
+use bevy_app::{WorldPlugin, WorldAppExt};
+#[cfg(feature = "bevy_app")]
+use bevy_ecs::world::World;
 
 /// Provides hierarchy functionality to a Bevy app.
 ///
@@ -87,9 +89,9 @@ pub struct HierarchyPlugin;
 
 #[cfg(feature = "bevy_app")]
 use bevy_utils::smallvec::SmallVec;
-impl Plugin for HierarchyPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_type::<Children>()
+impl WorldPlugin for HierarchyPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_type::<Children>()
             .register_type::<Parent>()
             .register_type::<SmallVec<[bevy_ecs::entity::Entity; 8]>>()
             .add_event::<HierarchyEvent>();

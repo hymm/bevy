@@ -9,7 +9,7 @@ mod converter;
 mod gilrs_system;
 mod rumble;
 
-use bevy_app::{App, Plugin, PostUpdate, PreStartup, PreUpdate};
+use bevy_app::{PostUpdate, PreStartup, PreUpdate, WorldPlugin, WorldAppExt};
 use bevy_ecs::prelude::*;
 use bevy_input::InputSystem;
 use bevy_utils::tracing::error;
@@ -25,15 +25,15 @@ pub struct GilrsPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct RumbleSystem;
 
-impl Plugin for GilrsPlugin {
-    fn build(&self, app: &mut App) {
+impl WorldPlugin for GilrsPlugin {
+    fn build(&self, world: &mut World) {
         match GilrsBuilder::new()
             .with_default_filters(false)
             .set_update_state(false)
             .build()
         {
             Ok(gilrs) => {
-                app.insert_non_send_resource(gilrs)
+                world.insert_non_send_resource(gilrs)
                     .init_non_send_resource::<RunningRumbleEffects>()
                     .add_systems(PreStartup, gilrs_event_startup_system)
                     .add_systems(PreUpdate, gilrs_event_system.before(InputSystem))

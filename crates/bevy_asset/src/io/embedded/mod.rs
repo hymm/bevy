@@ -210,8 +210,8 @@ macro_rules! embedded_asset {
 /// Loads an "internal" asset by embedding the string stored in the given `path_str` and associates it with the given handle.
 #[macro_export]
 macro_rules! load_internal_asset {
-    ($app: ident, $handle: expr, $path_str: expr, $loader: expr) => {{
-        let mut assets = $app.world.resource_mut::<$crate::Assets<_>>();
+    ($world: expr, $handle: expr, $path_str: expr, $loader: expr) => {{
+        let mut assets = $world.resource_mut::<$crate::Assets<_>>();
         assets.insert($handle, ($loader)(
             include_str!($path_str),
             std::path::Path::new(file!())

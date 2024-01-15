@@ -1,6 +1,6 @@
 use async_channel::{Receiver, Sender};
 
-use bevy_app::{App, AppLabel, Main, Plugin, SubApp};
+use bevy_app::{App, AppLabel, Main, Plugin, SubApp, WorldAppExt};
 use bevy_ecs::{
     schedule::MainThreadExecutor,
     system::Resource,
@@ -69,10 +69,10 @@ impl Plugin for PipelinedRenderingPlugin {
         if app.get_sub_app(RenderApp).is_err() {
             return;
         }
-        app.insert_resource(MainThreadExecutor::new());
+        app.world.insert_resource(MainThreadExecutor::new());
 
         let mut sub_app = App::empty();
-        sub_app.init_schedule(Main);
+        sub_app.world.init_schedule(Main);
         app.insert_sub_app(RenderExtractApp, SubApp::new(sub_app, update_rendering));
     }
 
@@ -96,8 +96,8 @@ impl Plugin for PipelinedRenderingPlugin {
 
         render_to_app_sender.send_blocking(render_app).unwrap();
 
-        app.insert_resource(MainToRenderAppSender(app_to_render_sender));
-        app.insert_resource(RenderToMainAppReceiver(render_to_app_receiver));
+        app.world.insert_resource(MainToRenderAppSender(app_to_render_sender));
+        app.world.insert_resource(RenderToMainAppReceiver(render_to_app_receiver));
 
         std::thread::spawn(move || {
             #[cfg(feature = "trace")]

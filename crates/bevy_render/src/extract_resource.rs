@@ -1,8 +1,9 @@
 use std::marker::PhantomData;
 
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, WorldPlugin, WorldAppExt};
 use bevy_ecs::prelude::*;
 pub use bevy_render_macros::ExtractResource;
+use bevy_utils::intern::Interned;
 
 use crate::{Extract, ExtractSchedule, RenderApp};
 
@@ -29,11 +30,13 @@ impl<R: ExtractResource> Default for ExtractResourcePlugin<R> {
     }
 }
 
-impl<R: ExtractResource> Plugin for ExtractResourcePlugin<R> {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(ExtractSchedule, extract_resource::<R>);
-        }
+impl<R: ExtractResource> WorldPlugin for ExtractResourcePlugin<R> {
+    fn world(&self) -> Option<Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world.add_systems(ExtractSchedule, extract_resource::<R>);
     }
 }
 

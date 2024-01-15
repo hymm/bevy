@@ -5,7 +5,7 @@ use crate::{
     renderer::{RenderDevice, RenderQueue},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, PluginGroup, WorldAppExt, WorldPlugin, WorldPluginHolder};
 use bevy_asset::{load_internal_asset, Handle};
 use bevy_core::FrameCount;
 use bevy_ecs::prelude::*;
@@ -14,23 +14,44 @@ use bevy_time::Time;
 
 pub const GLOBALS_TYPE_HANDLE: Handle<Shader> = Handle::weak_from_u128(17924628719070609599);
 
+pub struct GlobalsPlugins;
+impl PluginGroup for GlobalsPlugins {
+    fn build(self) -> bevy_app::PluginGroupBuilder {
+        self.build()
+            .add(WorldPluginHolder::from(GlobalsPlugin))
+            .add(WorldPluginHolder::from(GlobalsRenderPlugin))
+    }
+}
+
 pub struct GlobalsPlugin;
 
-impl Plugin for GlobalsPlugin {
-    fn build(&self, app: &mut App) {
-        load_internal_asset!(app, GLOBALS_TYPE_HANDLE, "globals.wgsl", Shader::from_wgsl);
-        app.register_type::<GlobalsUniform>();
+impl WorldPlugin for GlobalsPlugin {
+    fn build(&self, world: &mut World) {
+        load_internal_asset!(
+            world,
+            GLOBALS_TYPE_HANDLE,
+            "globals.wgsl",
+            Shader::from_wgsl
+        );
+        world.register_type::<GlobalsUniform>();
+    }
+}
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .init_resource::<GlobalsBuffer>()
-                .init_resource::<Time>()
-                .add_systems(ExtractSchedule, (extract_frame_count, extract_time))
-                .add_systems(
-                    Render,
-                    prepare_globals_buffer.in_set(RenderSet::PrepareResources),
-                );
-        }
+pub struct GlobalsRenderPlugin;
+impl WorldPlugin for GlobalsRenderPlugin {
+    fn world(&self) -> Option<bevy_utils::intern::Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world
+            .init_resource::<GlobalsBuffer>()
+            .init_resource::<Time>()
+            .add_systems(ExtractSchedule, (extract_frame_count, extract_time))
+            .add_systems(
+                Render,
+                prepare_globals_buffer.in_set(RenderSet::PrepareResources),
+            );
     }
 }
 

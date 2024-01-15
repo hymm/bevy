@@ -10,7 +10,7 @@ use std::sync::{
 
 pub use accesskit;
 use accesskit::NodeBuilder;
-use bevy_app::Plugin;
+use bevy_app::WorldPlugin;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Component, Entity, Event},
@@ -101,9 +101,10 @@ pub enum AccessibilitySystem {
 /// Plugin managing non-GUI aspects of integrating with accessibility APIs.
 pub struct AccessibilityPlugin;
 
-impl Plugin for AccessibilityPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<AccessibilityRequested>()
+impl WorldPlugin for AccessibilityPlugin {
+    fn build(&self, world: &mut bevy_ecs::world::World) {
+        world
+            .init_resource::<AccessibilityRequested>()
             .init_resource::<ManageAccessibilityUpdates>()
             .init_resource::<Focus>()
             .allow_ambiguous_component::<AccessibilityNode>();

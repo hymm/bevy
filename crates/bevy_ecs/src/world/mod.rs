@@ -1040,6 +1040,12 @@ impl World {
             .map(|e| e.into())
     }
 
+    pub fn init_resource<R: Resource + FromWorld>(&mut self) -> &mut Self {
+        self.init_resource_inner::<R>();
+
+        self
+    }
+
     /// Initializes a new resource and returns the [`ComponentId`] created for it.
     ///
     /// If the resource already exists, nothing happens.
@@ -1048,7 +1054,7 @@ impl World {
     /// Note that any resource with the [`Default`] trait automatically implements [`FromWorld`],
     /// and those default values will be here instead.
     #[inline]
-    pub fn init_resource<R: Resource + FromWorld>(&mut self) -> ComponentId {
+    pub fn init_resource_inner<R: Resource + FromWorld>(&mut self) -> ComponentId {
         let component_id = self.components.init_resource::<R>();
         if self
             .storages
@@ -1073,7 +1079,7 @@ impl World {
     /// If you insert a resource of a type that already exists,
     /// you will overwrite any existing data.
     #[inline]
-    pub fn insert_resource<R: Resource>(&mut self, value: R) {
+    pub fn insert_resource<R: Resource>(&mut self, value: R) -> &mut Self {
         let component_id = self.components.init_resource::<R>();
         OwningPtr::make(value, |ptr| {
             // SAFETY: component_id was just initialized and corresponds to resource of type R.
@@ -1081,6 +1087,8 @@ impl World {
                 self.insert_resource_by_id(component_id, ptr);
             }
         });
+
+        self
     }
 
     /// Initializes a new non-send resource and returns the [`ComponentId`] created for it.
@@ -1095,7 +1103,7 @@ impl World {
     ///
     /// Panics if called from a thread other than the main thread.
     #[inline]
-    pub fn init_non_send_resource<R: 'static + FromWorld>(&mut self) -> ComponentId {
+    pub fn init_non_send_resource_inner<R: 'static + FromWorld>(&mut self) -> ComponentId {
         let component_id = self.components.init_non_send::<R>();
         if self
             .storages
@@ -1114,6 +1122,12 @@ impl World {
         component_id
     }
 
+    #[inline]
+    pub fn init_non_send_resource<R: 'static + FromWorld>(&mut self) -> &mut Self {
+        self.init_non_send_resource_inner::<R>();
+        self
+    }
+    
     /// Inserts a new non-send resource with the given `value`.
     ///
     /// `NonSend` resources cannot be sent across threads,
@@ -1124,7 +1138,7 @@ impl World {
     /// If a value is already present, this function will panic if called
     /// from a different thread than where the original value was inserted from.
     #[inline]
-    pub fn insert_non_send_resource<R: 'static>(&mut self, value: R) {
+    pub fn insert_non_send_resource<R: 'static>(&mut self, value: R) -> &mut Self {
         let component_id = self.components.init_non_send::<R>();
         OwningPtr::make(value, |ptr| {
             // SAFETY: component_id was just initialized and corresponds to resource of type R.
@@ -1132,6 +1146,8 @@ impl World {
                 self.insert_non_send_by_id(component_id, ptr);
             }
         });
+
+        self
     }
 
     /// Removes the resource of a given type and returns it, if it exists. Otherwise returns `None`.
@@ -2027,9 +2043,11 @@ impl World {
     /// accessing the [`Schedules`] resource.
     ///
     /// The `Schedules` resource will be initialized if it does not already exist.
-    pub fn add_schedule(&mut self, schedule: Schedule) {
+    pub fn add_schedule(&mut self, schedule: Schedule) -> &mut Self {
         let mut schedules = self.get_resource_or_insert_with(Schedules::default);
         schedules.insert(schedule);
+
+        self
     }
 
     /// Temporarily removes the schedule associated with `label` from the world,
@@ -2148,10 +2166,12 @@ impl World {
     }
 
     /// Ignore system order ambiguities caused by conflicts on [`Resource`]s of type `T`.
-    pub fn allow_ambiguous_resource<T: Resource>(&mut self) {
+    pub fn allow_ambiguous_resource<T: Resource>(&mut self) -> &mut Self {
         let mut schedules = self.remove_resource::<Schedules>().unwrap_or_default();
         schedules.allow_ambiguous_resource::<T>(self);
         self.insert_resource(schedules);
+
+        self
     }
 }
 
@@ -2426,9 +2446,9 @@ mod tests {
     fn init_resource_does_not_overwrite() {
         let mut world = World::new();
         world.insert_resource(TestResource(0));
-        world.init_resource::<TestFromWorld>();
+        world.init_resource_inner::<TestFromWorld>();
         world.insert_resource(TestResource(1));
-        world.init_resource::<TestFromWorld>();
+        world.init_resource_inner::<TestFromWorld>();
 
         let resource = world.resource::<TestFromWorld>();
 

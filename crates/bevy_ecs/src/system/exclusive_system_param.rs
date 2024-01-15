@@ -137,7 +137,7 @@ mod tests {
         schedule.add_systems(my_system);
 
         let mut world = World::default();
-        world.init_resource::<Res>();
+        world.init_resource_inner::<Res>();
 
         schedule.run(&mut world);
         schedule.run(&mut world);

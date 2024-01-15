@@ -17,7 +17,7 @@ pub mod prelude {
     };
 }
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt, WorldPluginExt};
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::ValidParentCheckPlugin;
 use bevy_math::{Affine3A, Mat4, Vec3};
@@ -91,16 +91,16 @@ pub enum TransformSystem {
 #[derive(Default)]
 pub struct TransformPlugin;
 
-impl Plugin for TransformPlugin {
-    fn build(&self, app: &mut App) {
+impl WorldPlugin for TransformPlugin {
+    fn build(&self, world: &mut World) {
         // A set for `propagate_transforms` to mark it as ambiguous with `sync_simple_transforms`.
         // Used instead of the `SystemTypeSet` as that would not allow multiple instances of the system.
         #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
         struct PropagateTransformsSet;
 
-        app.register_type::<Transform>()
+        world.register_type::<Transform>()
             .register_type::<GlobalTransform>()
-            .add_plugins(ValidParentCheckPlugin::<GlobalTransform>::default())
+            .add_plugin(ValidParentCheckPlugin::<GlobalTransform>::default())
             .configure_sets(
                 PostStartup,
                 PropagateTransformsSet.in_set(TransformSystem::TransformPropagate),

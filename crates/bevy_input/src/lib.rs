@@ -33,7 +33,7 @@ pub mod prelude {
     };
 }
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldPlugin, WorldAppExt};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use keyboard::{keyboard_input_system, KeyCode, KeyboardInput};
@@ -63,9 +63,9 @@ pub struct InputPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct InputSystem;
 
-impl Plugin for InputPlugin {
-    fn build(&self, app: &mut App) {
-        app
+impl WorldPlugin for InputPlugin {
+    fn build(&self, world: &mut World) {
+        world
             // keyboard
             .add_event::<KeyboardInput>()
             .init_resource::<ButtonInput<KeyCode>>()
@@ -110,30 +110,30 @@ impl Plugin for InputPlugin {
             .add_systems(PreUpdate, touch_screen_input_system.in_set(InputSystem));
 
         // Register common types
-        app.register_type::<ButtonState>();
+        world.register_type::<ButtonState>();
 
         // Register keyboard types
-        app.register_type::<KeyboardInput>()
+        world.register_type::<KeyboardInput>()
             .register_type::<KeyCode>();
 
         // Register mouse types
-        app.register_type::<MouseButtonInput>()
+        world.register_type::<MouseButtonInput>()
             .register_type::<MouseButton>()
             .register_type::<MouseMotion>()
             .register_type::<MouseScrollUnit>()
             .register_type::<MouseWheel>();
 
         // Register touchpad types
-        app.register_type::<TouchpadMagnify>()
+        world.register_type::<TouchpadMagnify>()
             .register_type::<TouchpadRotate>();
 
         // Register touch types
-        app.register_type::<TouchInput>()
+        world.register_type::<TouchInput>()
             .register_type::<ForceTouch>()
             .register_type::<TouchPhase>();
 
         // Register gamepad types
-        app.register_type::<Gamepad>()
+        world.register_type::<Gamepad>()
             .register_type::<GamepadConnection>()
             .register_type::<GamepadButtonType>()
             .register_type::<GamepadButton>()

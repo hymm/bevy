@@ -1073,7 +1073,7 @@ fn retain<T: Bundle>(entity: Entity, world: &mut World) {
 /// A [`Command`] that inserts a [`Resource`] into the world using a value
 /// created with the [`FromWorld`] trait.
 fn init_resource<R: Resource + FromWorld>(world: &mut World) {
-    world.init_resource::<R>();
+    world.init_resource_inner::<R>();
 }
 
 /// A [`Command`] that removes the [resource](Resource) `R` from the world.

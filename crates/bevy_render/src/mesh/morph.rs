@@ -4,7 +4,7 @@ use crate::{
     render_resource::{Extent3d, TextureDimension, TextureFormat},
     texture::Image,
 };
-use bevy_app::{Plugin, PostUpdate};
+use bevy_app::{PostUpdate, WorldPlugin, WorldAppExt};
 use bevy_asset::Handle;
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::Children;
@@ -25,9 +25,9 @@ pub const MAX_MORPH_WEIGHTS: usize = 64;
 /// [Inherit weights](inherit_weights) from glTF mesh parent entity to direct
 /// bevy mesh child entities (ie: glTF primitive).
 pub struct MorphPlugin;
-impl Plugin for MorphPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
-        app.register_type::<MorphWeights>()
+impl WorldPlugin for MorphPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_type::<MorphWeights>()
             .register_type::<MeshMorphWeights>()
             .add_systems(PostUpdate, inherit_weights);
     }

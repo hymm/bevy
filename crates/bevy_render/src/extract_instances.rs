@@ -6,15 +6,15 @@
 
 use std::marker::PhantomData;
 
-use bevy_app::{App, Plugin};
+use bevy_app::{AppLabel, WorldPlugin, WorldAppExt};
 use bevy_asset::{Asset, AssetId, Handle};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::Entity,
     query::{QueryFilter, QueryItem, ReadOnlyQueryData},
-    system::{lifetimeless::Read, Query, ResMut, Resource},
+    system::{lifetimeless::Read, Query, ResMut, Resource}, world::World,
 };
-use bevy_utils::EntityHashMap;
+use bevy_utils::{intern::Interned, EntityHashMap};
 
 use crate::{prelude::ViewVisibility, Extract, ExtractSchedule, RenderApp};
 
@@ -89,18 +89,20 @@ where
     }
 }
 
-impl<EI> Plugin for ExtractInstancesPlugin<EI>
+impl<EI> WorldPlugin for ExtractInstancesPlugin<EI>
 where
     EI: ExtractInstance,
 {
-    fn build(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<ExtractedInstances<EI>>();
-            if self.only_extract_visible {
-                render_app.add_systems(ExtractSchedule, extract_visible::<EI>);
-            } else {
-                render_app.add_systems(ExtractSchedule, extract_all::<EI>);
-            }
+    fn world(&self) -> Option<Interned<dyn AppLabel>> {
+        Some(RenderApp.intern())
+    }
+
+    fn build(&self, world: &mut World) {
+        world.init_resource::<ExtractedInstances<EI>>();
+        if self.only_extract_visible {
+            world.add_systems(ExtractSchedule, extract_visible::<EI>);
+        } else {
+            world.add_systems(ExtractSchedule, extract_all::<EI>);
         }
     }
 }

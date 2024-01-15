@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn test_ui_stack_system() {
         let mut world = World::default();
-        world.init_resource::<UiStack>();
+        world.init_resource_inner::<UiStack>();
 
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);

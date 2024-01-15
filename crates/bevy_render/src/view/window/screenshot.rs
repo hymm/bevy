@@ -130,7 +130,7 @@ impl Plugin for ScreenshotPlugin {
         app.init_resource::<ScreenshotManager>();
 
         load_internal_asset!(
-            app,
+            app.world,
             SCREENSHOT_SHADER_HANDLE,
             "screenshot.wgsl",
             Shader::from_wgsl

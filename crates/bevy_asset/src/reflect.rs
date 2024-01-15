@@ -237,7 +237,7 @@ mod tests {
 
     use crate as bevy_asset;
     use crate::{Asset, AssetApp, AssetPlugin, ReflectAsset, UntypedHandle};
-    use bevy_app::App;
+    use bevy_app::{App, WorldPluginHolder};
     use bevy_ecs::reflect::AppTypeRegistry;
     use bevy_reflect::{Reflect, ReflectMut};
 
@@ -249,7 +249,8 @@ mod tests {
     #[test]
     fn test_reflect_asset_operations() {
         let mut app = App::new();
-        app.add_plugins(AssetPlugin::default())
+        app.add_plugins(WorldPluginHolder::from(AssetPlugin::default()));
+        app.world
             .init_asset::<AssetType>()
             .register_asset_reflect::<AssetType>();
 

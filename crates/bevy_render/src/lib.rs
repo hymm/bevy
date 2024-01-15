@@ -43,24 +43,26 @@ pub mod prelude {
     };
 }
 
+use camera::CameraPlugins;
 pub use extract_param::Extract;
 
 use bevy_hierarchy::ValidParentCheckPlugin;
 use bevy_window::{PrimaryWindow, RawHandleWrapper};
-use globals::GlobalsPlugin;
+use globals::{GlobalsPlugin, GlobalsPlugins};
+use mesh::MeshPlugins;
 use renderer::{RenderAdapter, RenderAdapterInfo, RenderDevice, RenderQueue};
+use view::ViewPlugins;
 
 use crate::deterministic::DeterministicRenderingConfig;
 use crate::{
-    camera::CameraPlugin,
-    mesh::{morph::MorphPlugin, Mesh, MeshPlugin},
+    mesh::{morph::MorphPlugin, Mesh},
     render_asset::prepare_assets,
     render_resource::{PipelineCache, Shader, ShaderLoader},
     renderer::{render_system, RenderInstance},
     settings::RenderCreation,
     view::{ViewPlugin, WindowRenderPlugin},
 };
-use bevy_app::{App, AppLabel, Plugin, SubApp};
+use bevy_app::{App, AppLabel, Plugin, SubApp, WorldAppExt, WorldPluginHolder};
 use bevy_asset::{load_internal_asset, AssetApp, AssetServer, Handle};
 use bevy_ecs::{prelude::*, schedule::ScheduleLabel, system::SystemState};
 use bevy_utils::tracing::debug;
@@ -219,9 +221,9 @@ pub const MATHS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(106653563
 impl Plugin for RenderPlugin {
     /// Initializes the renderer, sets up the [`RenderSet`] and creates the rendering sub-app.
     fn build(&self, app: &mut App) {
-        app.init_resource::<DeterministicRenderingConfig>();
+        app.world.init_resource::<DeterministicRenderingConfig>();
 
-        app.init_asset::<Shader>()
+        app.world.init_asset::<Shader>()
             .init_asset_loader::<ShaderLoader>();
 
         match &self.render_creation {
@@ -233,7 +235,7 @@ impl Plugin for RenderPlugin {
                     adapter.clone(),
                     instance.clone(),
                 ))));
-                app.insert_resource(FutureRendererResources(
+                app.world.insert_resource(FutureRendererResources(
                     future_renderer_resources_wrapper.clone(),
                 ));
                 // SAFETY: Plugins should be set up on the main thread.
@@ -242,7 +244,7 @@ impl Plugin for RenderPlugin {
             RenderCreation::Automatic(render_creation) => {
                 if let Some(backends) = render_creation.backends {
                     let future_renderer_resources_wrapper = Arc::new(Mutex::new(None));
-                    app.insert_resource(FutureRendererResources(
+                    app.world.insert_resource(FutureRendererResources(
                         future_renderer_resources_wrapper.clone(),
                     ));
 
@@ -308,16 +310,17 @@ impl Plugin for RenderPlugin {
         };
 
         app.add_plugins((
-            ValidParentCheckPlugin::<view::InheritedVisibility>::default(),
+            WorldPluginHolder::from(ValidParentCheckPlugin::<view::InheritedVisibility>::default()),
             WindowRenderPlugin,
-            CameraPlugin,
-            ViewPlugin,
-            MeshPlugin,
-            GlobalsPlugin,
-            MorphPlugin,
+            CameraPlugins,
+            ViewPlugins,
+            MeshPlugins,
+            GlobalsPlugins,
+            WorldPluginHolder::from(MorphPlugin),
         ));
 
-        app.register_type::<color::Color>()
+        app.world
+            .register_type::<color::Color>()
             .register_type::<primitives::Aabb>()
             .register_type::<primitives::CascadesFrusta>()
             .register_type::<primitives::CubemapFrusta>()
@@ -342,7 +345,7 @@ impl Plugin for RenderPlugin {
                 "BASE_INSTANCE_WORKAROUND".into()
             ]
         );
-        load_internal_asset!(app, MATHS_SHADER_HANDLE, "maths.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app.world, MATHS_SHADER_HANDLE, "maths.wgsl", Shader::from_wgsl);
         if let Some(future_renderer_resources) =
             app.world.remove_resource::<FutureRendererResources>()
         {

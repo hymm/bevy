@@ -82,7 +82,7 @@ pub enum ComputeGlobalTransformError {
 mod tests {
     use std::f32::consts::TAU;
 
-    use bevy_app::App;
+    use bevy_app::{App, WorldPluginExt};
     use bevy_ecs::system::SystemState;
     use bevy_hierarchy::BuildWorldChildren;
     use bevy_math::{Quat, Vec3};
@@ -116,7 +116,7 @@ mod tests {
 
     fn match_transform_propagation_systems_inner(transforms: Vec<Transform>) {
         let mut app = App::new();
-        app.add_plugins(TransformPlugin);
+        app.world.add_plugin(TransformPlugin);
 
         let mut entity = None;
 

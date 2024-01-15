@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn run_two_systems() {
         let mut world = World::new();
-        world.init_resource::<Counter>();
+        world.init_resource_inner::<Counter>();
         assert_eq!(*world.resource::<Counter>(), Counter(0));
         world.run_system_once(count_up);
         assert_eq!(*world.resource::<Counter>(), Counter(1));

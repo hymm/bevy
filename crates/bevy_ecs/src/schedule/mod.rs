@@ -75,7 +75,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(make_function_system(0));
             schedule.run(&mut world);
@@ -88,7 +88,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(make_exclusive_system(0));
             schedule.run(&mut world);
@@ -127,7 +127,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems((
                 named_system,
@@ -165,7 +165,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems((
                 named_exclusive_system,
@@ -182,7 +182,7 @@ mod tests {
             let mut world = World::new();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(
                 (
@@ -203,7 +203,7 @@ mod tests {
             let mut world = World::new();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(
                 (
@@ -253,8 +253,8 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<RunConditionBool>();
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<RunConditionBool>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(
                 make_function_system(0).run_if(|condition: Res<RunConditionBool>| condition.0),
@@ -274,7 +274,7 @@ mod tests {
             let mut schedule = Schedule::default();
 
             world.insert_resource(RunConditionBool(true));
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<SystemOrder>();
 
             fn change_condition(mut condition: ResMut<RunConditionBool>) {
                 condition.0 = false;
@@ -299,8 +299,8 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<RunConditionBool>();
-            world.init_resource::<SystemOrder>();
+            world.init_resource_inner::<RunConditionBool>();
+            world.init_resource_inner::<SystemOrder>();
 
             schedule.add_systems(
                 make_exclusive_system(0).run_if(|condition: Res<RunConditionBool>| condition.0),
@@ -319,7 +319,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<Counter>();
+            world.init_resource_inner::<Counter>();
 
             schedule.add_systems((
                 counting_system.run_if(|| false).run_if(|| false),
@@ -337,7 +337,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<Counter>();
+            world.init_resource_inner::<Counter>();
 
             schedule.configure_sets(TestSet::A.run_if(|| false).run_if(|| false));
             schedule.add_systems(counting_system.in_set(TestSet::A));
@@ -357,7 +357,7 @@ mod tests {
             let mut world = World::default();
             let mut schedule = Schedule::default();
 
-            world.init_resource::<Counter>();
+            world.init_resource_inner::<Counter>();
 
             schedule.configure_sets(TestSet::A.run_if(|| false));
             schedule.add_systems(counting_system.in_set(TestSet::A).run_if(|| false));
@@ -378,9 +378,9 @@ mod tests {
             struct Bool2(pub bool);
 
             let mut world = World::default();
-            world.init_resource::<Counter>();
-            world.init_resource::<RunConditionBool>();
-            world.init_resource::<Bool2>();
+            world.init_resource_inner::<Counter>();
+            world.init_resource_inner::<RunConditionBool>();
+            world.init_resource_inner::<Bool2>();
             let mut schedule = Schedule::default();
 
             schedule.add_systems(
@@ -426,9 +426,9 @@ mod tests {
             struct Bool2(pub bool);
 
             let mut world = World::default();
-            world.init_resource::<Counter>();
-            world.init_resource::<RunConditionBool>();
-            world.init_resource::<Bool2>();
+            world.init_resource_inner::<Counter>();
+            world.init_resource_inner::<RunConditionBool>();
+            world.init_resource_inner::<Bool2>();
             let mut schedule = Schedule::default();
 
             schedule.configure_sets(
@@ -476,9 +476,9 @@ mod tests {
             struct Bool2(pub bool);
 
             let mut world = World::default();
-            world.init_resource::<Counter>();
-            world.init_resource::<RunConditionBool>();
-            world.init_resource::<Bool2>();
+            world.init_resource_inner::<Counter>();
+            world.init_resource_inner::<RunConditionBool>();
+            world.init_resource_inner::<Bool2>();
             let mut schedule = Schedule::default();
 
             schedule
@@ -761,7 +761,7 @@ mod tests {
             let mut world = World::new();
             world.insert_resource(R);
             world.spawn(A);
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule
@@ -778,7 +778,7 @@ mod tests {
             let mut world = World::new();
             world.insert_resource(R);
             world.spawn(A);
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule.add_systems((
@@ -806,7 +806,7 @@ mod tests {
             let mut world = World::new();
             world.insert_resource(R);
             world.spawn(A);
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule.add_systems((
@@ -880,7 +880,7 @@ mod tests {
         #[test]
         fn events() {
             let mut world = World::new();
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule.add_systems((
@@ -900,7 +900,7 @@ mod tests {
             let mut world = World::new();
             world.insert_resource(R);
             world.spawn(A);
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule.add_systems((
@@ -919,7 +919,7 @@ mod tests {
         #[test]
         fn before_and_after() {
             let mut world = World::new();
-            world.init_resource::<Events<E>>();
+            world.init_resource_inner::<Events<E>>();
 
             let mut schedule = Schedule::default();
             schedule.add_systems((

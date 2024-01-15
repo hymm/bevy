@@ -6,7 +6,7 @@ use crate::{
     texture::TextureFormatPixelInfo,
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, WorldPlugin, PluginGroup};
 use bevy_ecs::prelude::*;
 use bevy_utils::{default, tracing::debug, EntityHashMap, HashSet};
 use bevy_window::{
@@ -30,12 +30,17 @@ use super::Msaa;
 #[derive(Resource, Default)]
 pub struct NonSendMarker;
 
+pub struct WindowRenderPluginGroup;
+impl PluginGroup for WindowRenderPluginGroup {
+    fn build(self) -> bevy_app::PluginGroupBuilder {
+        self.build().add(ScreenshotPlugin).add(WindowRenderPlugin)
+    }
+}
+
 pub struct WindowRenderPlugin;
 
 impl Plugin for WindowRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ScreenshotPlugin);
-
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedWindows>()
@@ -48,6 +53,8 @@ impl Plugin for WindowRenderPlugin {
 
     fn finish(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            // TODO: this is dependent on the render device being initialized
+            // can probably move this into a rengular WorldPlugin::build call with proper dependency
             render_app.init_resource::<ScreenshotToScreenPipeline>();
         }
     }

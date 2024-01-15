@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 use std::ops::{Div, DivAssign, Mul, MulAssign};
 
-use bevy_app::{App, Plugin, PostStartup, PostUpdate};
+use bevy_app::{PostStartup, PostUpdate, WorldPlugin, WorldAppExt};
 use bevy_ecs::{prelude::*, reflect::ReflectComponent};
 use bevy_math::{AspectRatio, Mat4, Rect, Vec2, Vec3A};
 use bevy_reflect::{
@@ -24,9 +24,9 @@ impl<T: CameraProjection> Default for CameraProjectionPlugin<T> {
 #[derive(SystemSet, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct CameraUpdateSystem;
 
-impl<T: CameraProjection + Component + GetTypeRegistration> Plugin for CameraProjectionPlugin<T> {
-    fn build(&self, app: &mut App) {
-        app.register_type::<T>()
+impl<T: CameraProjection + Component + GetTypeRegistration> WorldPlugin for CameraProjectionPlugin<T> {
+    fn build(&self, world: &mut World) {
+        world.register_type::<T>()
             .add_systems(
                 PostStartup,
                 crate::camera::camera_system::<T>

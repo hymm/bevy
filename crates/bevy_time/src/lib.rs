@@ -24,7 +24,7 @@ pub mod prelude {
     pub use crate::{Fixed, Real, Time, Timer, TimerMode, Virtual};
 }
 
-use bevy_app::{prelude::*, RunFixedMainLoop};
+use bevy_app::{prelude::*, RunFixedMainLoop, WorldPlugin, WorldAppExt};
 use bevy_ecs::event::{event_queue_update_system, EventUpdateSignal};
 use bevy_ecs::prelude::*;
 use bevy_utils::{tracing::warn, Duration, Instant};
@@ -40,9 +40,9 @@ pub struct TimePlugin;
 /// this.
 pub struct TimeSystem;
 
-impl Plugin for TimePlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Time>()
+impl WorldPlugin for TimePlugin {
+    fn build(&self, world: &mut World) {
+        world.init_resource::<Time>()
             .init_resource::<Time<Real>>()
             .init_resource::<Time<Virtual>>()
             .init_resource::<Time<Fixed>>()
@@ -60,7 +60,7 @@ impl Plugin for TimePlugin {
             .add_systems(RunFixedMainLoop, run_fixed_main_schedule);
 
         // ensure the events are not dropped until `FixedMain` systems can observe them
-        app.init_resource::<EventUpdateSignal>()
+        world.init_resource::<EventUpdateSignal>()
             .add_systems(FixedPostUpdate, event_queue_update_system);
 
         #[cfg(feature = "bevy_ci_testing")]

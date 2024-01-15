@@ -20,7 +20,7 @@ pub mod prelude {
     };
 }
 
-use bevy_app::prelude::*;
+use bevy_app::{prelude::*, WorldAppExt, WorldPlugin};
 use bevy_ecs::prelude::*;
 use bevy_reflect::{ReflectDeserialize, ReflectSerialize};
 use bevy_utils::{Duration, HashSet, Instant, Uuid};
@@ -38,17 +38,18 @@ use bevy_tasks::tick_global_task_pools_on_main_thread;
 #[derive(Default)]
 pub struct TypeRegistrationPlugin;
 
-impl Plugin for TypeRegistrationPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_type::<Entity>().register_type::<Name>();
+impl WorldPlugin for TypeRegistrationPlugin {
+    fn build(&self, world: &mut World) {
+        world.register_type::<Entity>().register_type::<Name>();
 
-        register_rust_types(app);
-        register_math_types(app);
+        register_rust_types(world);
+        register_math_types(world);
     }
 }
 
-fn register_rust_types(app: &mut App) {
-    app.register_type::<Range<f32>>()
+fn register_rust_types(world: &mut World) {
+    world
+        .register_type::<Range<f32>>()
         .register_type_data::<Range<f32>, ReflectSerialize>()
         .register_type_data::<Range<f32>, ReflectDeserialize>()
         .register_type::<String>()
@@ -65,8 +66,9 @@ fn register_rust_types(app: &mut App) {
         .register_type::<Uuid>();
 }
 
-fn register_math_types(app: &mut App) {
-    app.register_type::<bevy_math::IVec2>()
+fn register_math_types(world: &mut World) {
+    world
+        .register_type::<bevy_math::IVec2>()
         .register_type::<bevy_math::IVec3>()
         .register_type::<bevy_math::IVec4>()
         .register_type::<bevy_math::UVec2>()
@@ -109,13 +111,13 @@ pub struct TaskPoolPlugin {
     pub task_pool_options: TaskPoolOptions,
 }
 
-impl Plugin for TaskPoolPlugin {
-    fn build(&self, _app: &mut App) {
+impl WorldPlugin for TaskPoolPlugin {
+    fn build(&self, _world: &mut World) {
         // Setup the default bevy task pools
         self.task_pool_options.create_default_pools();
 
         #[cfg(not(target_arch = "wasm32"))]
-        _app.add_systems(Last, tick_global_task_pools);
+        _world.add_systems(Last, tick_global_task_pools);
     }
 }
 /// A dummy type that is [`!Send`](Send), to force systems to run on the main thread.
@@ -147,10 +149,11 @@ pub struct FrameCount(pub u32);
 #[derive(Default)]
 pub struct FrameCountPlugin;
 
-impl Plugin for FrameCountPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<FrameCount>();
-        app.add_systems(Last, update_frame_count);
+impl WorldPlugin for FrameCountPlugin {
+    fn build(&self, world: &mut World) {
+        world
+            .init_resource::<FrameCount>()
+            .add_systems(Last, update_frame_count);
     }
 }
 
@@ -164,12 +167,13 @@ pub fn update_frame_count(mut frame_count: ResMut<FrameCount>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_app::WorldPluginHolder;
     use bevy_tasks::prelude::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 
     #[test]
     fn runs_spawn_local_tasks() {
         let mut app = App::new();
-        app.add_plugins((TaskPoolPlugin::default(), TypeRegistrationPlugin));
+        app.add_plugins((WorldPluginHolder::from(TaskPoolPlugin::default()), WorldPluginHolder::from(TypeRegistrationPlugin)));
 
         let (async_tx, async_rx) = crossbeam_channel::unbounded();
         AsyncComputeTaskPool::get()
@@ -203,9 +207,9 @@ mod tests {
     fn frame_counter_update() {
         let mut app = App::new();
         app.add_plugins((
-            TaskPoolPlugin::default(),
-            TypeRegistrationPlugin,
-            FrameCountPlugin,
+            WorldPluginHolder::from(TaskPoolPlugin::default()),
+            WorldPluginHolder::from(TypeRegistrationPlugin),
+            WorldPluginHolder::from(FrameCountPlugin),
         ));
         app.update();
 

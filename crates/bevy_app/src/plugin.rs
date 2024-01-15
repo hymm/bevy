@@ -1,9 +1,12 @@
-use bevy_ecs::{schedule::ScheduleLabel, system::IntoSystem, world::World};
+use bevy_ecs::{
+    schedule::{ScheduleLabel, SystemConfigs},
+    world::World,
+};
 use bevy_utils::intern::Interned;
 use downcast_rs::{impl_downcast, Downcast};
 
 use crate::{App, AppLabel};
-use std::any::Any;
+use std::{any::Any, sync::Mutex};
 
 /// A collection of Bevy app logic and configuration.
 ///
@@ -64,35 +67,80 @@ impl_downcast!(Plugin);
 
 /// [`WorldPlugin`] is a plugin that only acts on one world. Using this is preferred
 /// over [`AppPlugin`] when possible.
-pub trait WorldPlugin {
+pub trait WorldPlugin: Downcast + Send + Sync + 'static {
     /// world to add the plugin to. If None it defaults to the main world.
     fn world(&self) -> Option<Interned<dyn AppLabel>> {
         None
     }
 
     /// add dependencies between systems.
-    fn dependencies<M>(&self, _system: impl IntoSystem<(), (), M>) {}
+    fn dependencies(&self, _system: SystemConfigs) {}
 
     /// run methods on world to initialize plugin
-    /// this is run the first time app.update() is called.
+    /// this is run the first time `app.update()` is called.
     fn build(&self, world: &mut World);
 }
 
-trait WorldPluginExt {
-    fn add_plugin(&mut self, plugin: impl WorldPlugin + Send + Sync + 'static);
+impl<T> WorldPlugin for Box<T>
+where
+    T: WorldPlugin + ?Sized,
+{
+    fn build(&self, world: &mut World) {
+        (**self).build(world);
+    }
+}
+
+/// Add methods to world to add `WorldPlugins`
+pub trait WorldPluginExt {
+    /// add a [`WorldPlugin`] to the [`World`]
+    fn add_plugin(&mut self, plugin: impl WorldPlugin + Send + Sync + 'static) -> &mut Self;
 }
 
 impl WorldPluginExt for World {
-    fn add_plugin(&mut self, plugin: impl WorldPlugin + Send + Sync + 'static) {
+    fn add_plugin(&mut self, plugin: impl WorldPlugin) -> &mut Self {
         let system = move |world: &mut World| {
             plugin.build(world);
         };
 
-        plugin.dependencies(system);
+        // TODO: We can add initialization ordering between different plugins by
+        // adding dependencies between the different systems.
+        // plugin.dependencies(system);
 
         self.schedule_scope(PluginInit, |_world, schedule| {
             schedule.add_systems(system);
         });
+
+        self
+    }
+}
+
+pub struct WorldPluginHolder {
+    world_plugin: Mutex<Option<Box<dyn WorldPlugin>>>,
+}
+
+impl WorldPluginHolder {
+    fn take_plugin(&self) -> Box<dyn WorldPlugin> {
+        let mut guard = self.world_plugin.lock().unwrap();
+        guard.take().unwrap()
+    }
+}
+
+impl Plugin for WorldPluginHolder {
+    fn build(&self, app: &mut App) {
+        let plugin = self.take_plugin();
+        // add the plugin to the world in the build step
+        app.world.add_plugin(plugin);
+    }
+}
+
+impl<T> From<T> for WorldPluginHolder
+where
+    T: WorldPlugin,
+{
+    fn from(value: T) -> Self {
+        WorldPluginHolder {
+            world_plugin: Mutex::new(Some(Box::new(value))),
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{App, Plugin};
+use crate::{world_ext::WorldAppExt, WorldPlugin};
 use bevy_ecs::{
     schedule::{ExecutorKind, InternedScheduleLabel, Schedule, ScheduleLabel},
     system::{Local, Resource},
@@ -239,8 +239,8 @@ impl Main {
 /// Initializes the [`Main`] schedule, sub schedules, and resources for a given [`App`].
 pub struct MainSchedulePlugin;
 
-impl Plugin for MainSchedulePlugin {
-    fn build(&self, app: &mut App) {
+impl WorldPlugin for MainSchedulePlugin {
+    fn build(&self, world: &mut World) {
         // simple "facilitator" schedules benefit from simpler single threaded scheduling
         let mut main_schedule = Schedule::new(Main);
         main_schedule.set_executor_kind(ExecutorKind::SingleThreaded);
@@ -249,7 +249,8 @@ impl Plugin for MainSchedulePlugin {
         let mut fixed_main_loop_schedule = Schedule::new(RunFixedMainLoop);
         fixed_main_loop_schedule.set_executor_kind(ExecutorKind::SingleThreaded);
 
-        app.add_schedule(main_schedule)
+        world
+            .add_schedule(main_schedule)
             .add_schedule(fixed_main_schedule)
             .add_schedule(fixed_main_loop_schedule)
             .init_resource::<MainScheduleOrder>()
