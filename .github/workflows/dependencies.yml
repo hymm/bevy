@@ -35,13 +35,13 @@ jobs:
         run: cargo tree --depth 3 > cargo-tree-from-main
       - name: On main, save the new cargo tree cache
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: cargo-tree-from-main
           key: cargo-tree-from-main    
       # on other branch, restore the cached cargo tree output
       - name: On PR, restore cargo tree cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         if: github.ref != 'refs/heads/main'
         with:
           path: cargo-tree-from-main
