@@ -2465,5 +2465,25 @@ mod tests {
                 );
             });
         }
+
+        #[test]
+        fn chain_derived_system_param() {
+            #[derive(bevy_ecs::system::SystemParam)]
+            pub struct DerivedWithCommands<'w, 's> {
+                commands: bevy_ecs::system::Commands<'w, 's>,
+            }
+
+            run_schedule(3, |schedule: &mut Schedule| {
+                schedule.add_systems(
+                    (
+                        (|mut derived: DerivedWithCommands| derived.commands.insert_resource(Ra),),
+                        (|res_a: Option<Res<Ra>>| {
+                            assert!(res_a.is_some());
+                        },),
+                    )
+                        .chain(),
+                );
+            });
+        }
     }
 }
