@@ -1,7 +1,8 @@
 use async_channel::{Receiver, Sender};
 
-use bevy_app::{App, AppLabel, Main, Plugin, SubApp};
+use bevy_app::{App, AppExit, AppLabel, Main, Plugin, SubApp};
 use bevy_ecs::{
+    event::Events,
     schedule::MainThreadExecutor,
     system::Resource,
     world::{Mut, World},
@@ -176,6 +177,13 @@ impl Plugin for PipelinedRenderingPlugin {
 // This function waits for the rendering world to be received,
 // runs extract, and then sends the rendering world back to the render thread.
 fn update_rendering(app_world: &mut World, _sub_app: &mut App) {
+    // dont run render if app exit has been sent
+    if let Some(app_exit) = app_world.get_resource::<Events<AppExit>>() {
+        if !app_exit.is_empty() {
+            return;
+        }
+    }
+
     app_world.resource_scope(|world, main_thread_executor: Mut<MainThreadExecutor>| {
         world.resource_scope(|world, mut render_channels: Mut<RenderAppChannels>| {
             // we use a scope here to run any main thread tasks that the render world still needs to run
