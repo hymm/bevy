@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc, Mutex, TryLockError},
+    sync::{Arc, Mutex},
 };
 
 use async_channel::{Receiver, Sender};
@@ -12,8 +12,8 @@ use fixedbitset::FixedBitSet;
 use once_cell::sync::OnceCell;
 
 use super::{
-    shared_access::SharedSystemAccess, Conditions, ExecutorKind, MainThreadExecutor,
-    SyncUnsafeSchedule, SystemExecutor, SystemSchedule,
+    shared_access::SharedSystemAccess, ExecutorKind, MainThreadExecutor, SyncUnsafeSchedule,
+    SystemExecutor, SystemSchedule,
 };
 use crate::{
     archetype::ArchetypeComponentId,
@@ -52,9 +52,6 @@ impl SystemTask {
         scope: &'scope Scope<'scope, 'env, ()>,
         mut shared_access: SharedSystemAccess,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'scope>> {
-        // SAFETY: this is the only task that accesses this system
-        let system = unsafe { &mut *systems[self.system_id].get() };
-
         let task = async move {
             let mut count = 0;
             while count < self.dependencies_count {
@@ -73,6 +70,10 @@ impl SystemTask {
             // SAFETY: shared access is holding locks for the data that all the run conditions access
             if unsafe { self.should_run(world_cell) } {
                 // TODO: readd panic handling or fix in scope
+
+                // SAFETY: this is the only task that accesses this system
+                let system = unsafe { &mut *systems[self.system_id].get() };
+
                 // SAFETY: shared_access is holding locks for the data this system accesses
                 unsafe { system.run_unsafe((), world_cell) };
             }
@@ -85,6 +86,7 @@ impl SystemTask {
                         channel.send_blocking(()).unwrap();
                     }
                     DependentSystem::System(system_task) => {
+                        // TODO: handle exclusive systems and apply deferred.
                         if first_dependent.is_none() {
                             // let task = system_task.clone();
                             first_dependent = Some(system_task.get_task(
@@ -103,6 +105,11 @@ impl SystemTask {
                         }
                     }
                 }
+            }
+
+            // TODO: we can probably unwrap this recursion into a loop somehow
+            if let Some(task) = first_dependent {
+                task.await;
             }
         };
         // TODO: add instrumentation back
@@ -125,7 +132,7 @@ impl SystemTask {
             }
         }
 
-        for mut condition in self.system_run_conditions.iter() {
+        for condition in self.system_run_conditions.iter() {
             if unsafe { !condition.can_run(world) } {
                 should_run = false;
             }
@@ -168,7 +175,10 @@ enum DependentSystem {
 
 struct MultiThreadedExecutor {
     shared_access: SharedSystemAccess,
+
     roots: Vec<SystemTask>,
+
+    apply_final_deferred: bool,
 }
 
 impl SystemExecutor for MultiThreadedExecutor {
@@ -227,6 +237,6 @@ impl SystemExecutor for MultiThreadedExecutor {
     }
 
     fn set_apply_final_deferred(&mut self, value: bool) {
-        todo!()
+        self.apply_final_deferred = value;
     }
 }
