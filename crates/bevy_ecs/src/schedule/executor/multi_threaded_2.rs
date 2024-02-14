@@ -78,6 +78,8 @@ impl SystemTask {
                 unsafe { system.run_unsafe((), world_cell) };
             }
 
+            // TODO: remove the access
+
             // run dependencies
             let mut first_dependent = None;
             for dependent in &self.dependents {

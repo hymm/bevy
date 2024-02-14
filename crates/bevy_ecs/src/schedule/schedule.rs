@@ -542,6 +542,7 @@ pub struct ScheduleGraph {
     uninit: Vec<(NodeId, usize)>,
     hierarchy: Dag,
     dependency: Dag,
+    roots: Vec<NodeId>,
     ambiguous_with: UnGraphMap<NodeId, ()>,
     ambiguous_with_all: HashSet<NodeId>,
     conflicting_systems: Vec<(NodeId, NodeId, Vec<ComponentId>)>,
@@ -572,6 +573,7 @@ impl ScheduleGraph {
             settings: default(),
             no_sync_edges: BTreeSet::new(),
             auto_sync_node_ids: HashMap::new(),
+            roots: Vec::new(),
         }
     }
 
@@ -1081,6 +1083,9 @@ impl ScheduleGraph {
             graph: dependency_flattened,
         };
 
+        // calculate roots
+        self.roots = self.find_roots(&dependency_flattened_dag);
+
         let flat_results = check_graph(
             &dependency_flattened_dag.graph,
             &dependency_flattened_dag.topsort,
@@ -1103,6 +1108,21 @@ impl ScheduleGraph {
 
         // build the schedule
         Ok(self.build_schedule_inner(dependency_flattened_dag, hier_results.reachable))
+    }
+
+    fn find_roots(&self, dag: &Dag) -> Vec<NodeId> {
+        let mut roots = Vec::new();
+        for id in dag.topsort.iter() {
+            if dag.graph.neighbors_directed(*id, Incoming).count() == 0 {
+                roots.push(*id);
+            } else {
+                // since we're toposorted the first node with incoming nodes is not a root
+                // and any following will not be either
+                break;
+            }
+        }
+
+        roots
     }
 
     // modify the graph to have sync nodes for any dependants after a system with deferred system params
