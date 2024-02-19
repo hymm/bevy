@@ -31,7 +31,7 @@ struct SystemTask {
     /// channel for checking if all dependencies have finished
     dependency_finished_channel: Receiver<()>,
     /// Number of systems this system is dependent on.
-    dependencies_count: u32,
+    dependencies_count: usize,
     /// systems that are dependent on this one
     dependents: Vec<DependentSystem>,
 
@@ -189,7 +189,36 @@ impl SystemExecutor for MultiThreadedExecutor {
     }
 
     fn init(&mut self, schedule: &SystemSchedule) {
-        todo!()
+        // build list of channels indexed by node id.
+        let mut finish_send_channels = Vec::with_capacity(schedule.systems.len());
+        let mut finish_receive_channels = Vec::with_capacity(schedule.systems.len());
+        for _ in &schedule.system_ids {
+            // TODO: is setting the capacity faster? we're probably overprovisioning memory here
+            let (send, receive) = async_channel::bounded(schedule.systems.len());
+            finish_send_channels.push(send);
+            finish_receive_channels.push(receive);
+        }
+
+        self.roots = Vec::new();
+        for root in &schedule.roots {
+            // let system = schedule.systems[root.index()];
+            let dependents = &schedule.system_dependents[root.index()];
+            // take the system if available, or use the channel if not
+            let dependents = dependents
+                .iter()
+                .map(|d| finish_send_channels[*d].clone())
+                .collect();
+
+            self.roots.push(SystemTask {
+                system_id: root.index(),
+                dependency_finished_channel: finish_receive_channels[root.index()].clone(),
+                dependencies_count: schedule.system_dependencies.len(),
+                dependents,
+                archetype_component_access: todo!(),
+                system_set_run_conditions: todo!(),
+                system_run_conditions: todo!(),
+            });
+        }
     }
 
     fn run(
