@@ -33,8 +33,8 @@ struct Environment<'env, 'sys> {
 }
 
 struct Conditions<'a> {
-    system_conditions: &'a [SyncUnsafeCell<Vec<BoxedCondition>>],
-    set_conditions: &'a [SyncUnsafeCell<Vec<BoxedCondition>>],
+    system_conditions: &'a mut [Vec<BoxedCondition>],
+    set_conditions: &'a mut [Vec<BoxedCondition>],
     sets_with_conditions_of_systems: &'a [FixedBitSet],
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
@@ -49,12 +49,9 @@ impl<'env, 'sys> Environment<'env, 'sys> {
             executor,
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
             conditions: SyncUnsafeCell::new(Conditions {
-                system_conditions: SyncUnsafeCell::from_mut(
-                    schedule.system_conditions.as_mut_slice(),
-                )
-                .as_slice_of_cells(),
-                set_conditions: SyncUnsafeCell::from_mut(schedule.set_conditions.as_mut_slice())
-                    .as_slice_of_cells(),
+                system_conditions: schedule.system_conditions.as_mut_slice(),
+
+                set_conditions: schedule.set_conditions.as_mut_slice(),
                 sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
                 systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
             }),
@@ -407,7 +404,7 @@ impl ExecutorState {
             return;
         }
 
-        // SAETY:
+        // SAETY: Caller ensures that there are no other active references to conditions.
         let mut conditions = unsafe { &mut *context.environment.conditions.get() };
 
         // can't borrow since loop mutably borrows `self`
@@ -487,7 +484,7 @@ impl ExecutorState {
         self.ready_systems_copy = ready_systems;
     }
 
-    unsafe fn can_run(
+    fn can_run(
         &mut self,
         system_index: usize,
         system: &mut BoxedSystem,
@@ -507,10 +504,7 @@ impl ExecutorState {
         for set_idx in conditions.sets_with_conditions_of_systems[system_index]
             .difference(&self.evaluated_sets)
         {
-            // SAFETY:
-            // - We have exclusive access to `conditions`
-            let set_conditions = unsafe { &mut *conditions.set_conditions[set_idx].get() };
-            for condition in set_conditions {
+            for condition in &mut conditions.set_conditions[set_idx] {
                 condition.update_archetype_component_access(world);
                 if !condition
                     .archetype_component_access()
@@ -521,10 +515,7 @@ impl ExecutorState {
             }
         }
 
-        // SAFETY:
-        // - We have exclusive access to `conditions`
-        let system_conditions = unsafe { &mut *conditions.system_conditions[system_index].get() };
-        for condition in system_conditions {
+        for condition in &mut conditions.system_conditions[system_index] {
             condition.update_archetype_component_access(world);
             if !condition
                 .archetype_component_access()
@@ -572,14 +563,14 @@ impl ExecutorState {
                 continue;
             }
 
-            // SAFETY: We have exclusive access to conditions
-            let set_conditions = unsafe { &mut *conditions.set_conditions[set_idx].get() };
             // Evaluate the system set's conditions.
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the conditions.
             // - `update_archetype_component_access` has been called for each run condition.
-            let set_conditions_met = unsafe { evaluate_and_fold_conditions(set_conditions, world) };
+            let set_conditions_met = unsafe {
+                evaluate_and_fold_conditions(&mut conditions.set_conditions[set_idx], world)
+            };
 
             if !set_conditions_met {
                 self.skipped_systems
@@ -590,15 +581,14 @@ impl ExecutorState {
             self.evaluated_sets.insert(set_idx);
         }
 
-        // SAFETY: We have exclusive access to conditions
-        let system_conditions = unsafe { &mut *conditions.system_conditions[system_index].get() };
         // Evaluate the system's conditions.
         // SAFETY:
         // - The caller ensures that `world` has permission to read any data
         //   required by the conditions.
         // - `update_archetype_component_access` has been called for each run condition.
-        let system_conditions_met =
-            unsafe { evaluate_and_fold_conditions(system_conditions, world) };
+        let system_conditions_met = unsafe {
+            evaluate_and_fold_conditions(&mut conditions.system_conditions[system_index], world)
+        };
 
         if !system_conditions_met {
             self.skipped_systems.insert(system_index);
