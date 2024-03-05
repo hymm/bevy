@@ -28,7 +28,7 @@ use crate as bevy_ecs;
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
     systems: &'sys [SyncUnsafeCell<BoxedSystem>],
-    conditions: SyncUnsafeCell<Conditions<'sys>>,
+    conditions: Conditions<'sys>,
     world_cell: UnsafeWorldCell<'env>,
 }
 
@@ -48,7 +48,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
         Environment {
             executor,
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
-            conditions: SyncUnsafeCell::new(Conditions {
+            conditions: Conditions {
                 system_conditions: SyncUnsafeCell::from_mut(
                     schedule.system_conditions.as_mut_slice(),
                 )
@@ -57,7 +57,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
                     .as_slice_of_cells(),
                 sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
                 systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
-            }),
+            },
             world_cell: world.as_unsafe_world_cell(),
         }
     }
@@ -407,9 +407,6 @@ impl ExecutorState {
             return;
         }
 
-        // SAETY:
-        let mut conditions = unsafe { &mut *context.environment.conditions.get() };
-
         // can't borrow since loop mutably borrows `self`
         let mut ready_systems = std::mem::take(&mut self.ready_systems_copy);
 
@@ -428,12 +425,15 @@ impl ExecutorState {
                 // Therefore, no other reference to this system exists and there is no aliasing.
                 let system = unsafe { &mut *context.environment.systems[system_index].get() };
 
-                if !self.can_run(
-                    system_index,
-                    system,
-                    &mut conditions,
-                    context.environment.world_cell,
-                ) {
+                // SAFETY: Caller ensures exclusive access to set_conditions
+                if unsafe {
+                    !self.can_run(
+                        system_index,
+                        system,
+                        &context.environment.conditions,
+                        context.environment.world_cell,
+                    )
+                } {
                     // NOTE: exclusive systems with ambiguities are susceptible to
                     // being significantly displaced here (compared to single-threaded order)
                     // if systems after them in topological order can run
@@ -446,11 +446,12 @@ impl ExecutorState {
                 // SAFETY: `can_run` returned true, which means that:
                 // - It must have called `update_archetype_component_access` for each run condition.
                 // - There can be no systems running whose accesses would conflict with any conditions.
+                // - Caller ensures exclusive access to system_conditions
                 if unsafe {
                     !self.should_run(
                         system_index,
                         system,
-                        &mut conditions,
+                        &context.environment.conditions,
                         context.environment.world_cell,
                     )
                 } {
@@ -491,7 +492,7 @@ impl ExecutorState {
         &mut self,
         system_index: usize,
         system: &mut BoxedSystem,
-        conditions: &mut Conditions,
+        conditions: &Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
         let system_meta = &self.system_task_metadata[system_index];
@@ -563,7 +564,7 @@ impl ExecutorState {
         &mut self,
         system_index: usize,
         _system: &BoxedSystem,
-        conditions: &mut Conditions,
+        conditions: &Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
         let mut should_run = !self.skipped_systems.contains(system_index);
