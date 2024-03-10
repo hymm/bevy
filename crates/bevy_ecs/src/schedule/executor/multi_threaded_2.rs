@@ -18,7 +18,7 @@ use super::{
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
-    schedule::BoxedCondition,
+    schedule::{BoxedCondition, NodeId},
     system::BoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -44,6 +44,46 @@ struct SystemTask {
 }
 
 impl SystemTask {
+    /// buil
+    fn new(
+        system_id: usize,
+        assigned_systems: &mut FixedBitSet,
+        schedule: &SystemSchedule,
+        finish_receive_channels: &Vec<Receiver<()>>,
+        finish_send_channels: &Vec<Sender<()>>,
+    ) -> Self {
+        assigned_systems.set(system_id, true);
+
+        let dependents = &schedule.system_dependents[system_id];
+        // take the system if available, or use the channel if not
+        let dependents = dependents
+            .iter()
+            .map(|d| {
+                if assigned_systems.contains(*d) {
+                    DependentSystem::NotificationChannel(finish_send_channels[*d].clone())
+                } else {
+                    DependentSystem::System(SystemTask::new(
+                        *d,
+                        assigned_systems,
+                        schedule,
+                        finish_receive_channels,
+                        finish_send_channels,
+                    ))
+                }
+            })
+            .collect();
+
+        Self {
+            system_id,
+            dependency_finished_channel: finish_receive_channels[system_id].clone(),
+            dependencies_count: schedule.system_dependencies.len(),
+            dependents,
+            archetype_component_access: todo!(),
+            system_set_run_conditions: todo!(),
+            system_run_conditions: todo!(),
+        }
+    }
+
     // TODO: need to feed the system in here somehow and then send it back after done
     fn get_task<'scope, 'env: 'scope>(
         &'scope self,
@@ -200,33 +240,25 @@ impl SystemExecutor for MultiThreadedExecutor {
         }
 
         self.roots = Vec::new();
+        // keep track of which systems have been processed
+        let mut assigned_systems = FixedBitSet::with_capacity(schedule.systems.len());
         for root in &schedule.roots {
-            // let system = schedule.systems[root.index()];
-            let dependents = &schedule.system_dependents[root.index()];
-            // take the system if available, or use the channel if not
-            let dependents = dependents
-                .iter()
-                .map(|d| finish_send_channels[*d].clone())
-                .collect();
-
-            self.roots.push(SystemTask {
-                system_id: root.index(),
-                dependency_finished_channel: finish_receive_channels[root.index()].clone(),
-                dependencies_count: schedule.system_dependencies.len(),
-                dependents,
-                archetype_component_access: todo!(),
-                system_set_run_conditions: todo!(),
-                system_run_conditions: todo!(),
-            });
+            self.roots.push(SystemTask::new(
+                root.index(),
+                &mut assigned_systems,
+                schedule,
+                &finish_receive_channels,
+                &finish_send_channels,
+            ));
         }
     }
 
     fn run(
         &mut self,
         schedule: &mut SystemSchedule,
-        // TODO: Make skip_systems work correctly
-        _skip_systems: Option<FixedBitSet>,
         world: &mut World,
+        // TODO: Make skip_systems work correctly
+        _skip_systems: Option<&FixedBitSet>,
     ) {
         let thread_executor = world
             .get_resource::<MainThreadExecutor>()
@@ -254,17 +286,17 @@ impl SystemExecutor for MultiThreadedExecutor {
             },
         );
 
-        // if self.apply_final_deferred {
-        //     // Do one final apply buffers after all systems have completed
-        //     // Commands should be applied while on the scope's thread, not the executor's thread
-        //     let res = apply_deferred(&self.unapplied_systems, systems, world);
-        //     if let Err(payload) = res {
-        //         let mut panic_payload = self.panic_payload.lock().unwrap();
-        //         *panic_payload = Some(payload);
-        //     }
-        //     self.unapplied_systems.clear();
-        //     debug_assert!(self.unapplied_systems.is_clear());
-        // }
+        if self.apply_final_deferred {
+            // // Do one final apply buffers after all systems have completed
+            // // Commands should be applied while on the scope's thread, not the executor's thread
+            // let res = apply_deferred(&self.unapplied_systems, systems, world);
+            // if let Err(payload) = res {
+            //     let mut panic_payload = self.panic_payload.lock().unwrap();
+            //     *panic_payload = Some(payload);
+            // }
+            // self.unapplied_systems.clear();
+            // debug_assert!(self.unapplied_systems.is_clear());
+        }
     }
 
     fn set_apply_final_deferred(&mut self, value: bool) {
