@@ -23,6 +23,53 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
+
+/// References to data required by the executor.
+/// This is copied to each system task so that can invoke the executor when they complete.
+// These all need to outlive 'scope in order to be sent to new tasks,
+// and keeping them all in a struct means we can use lifetime elision.
+#[derive(Copy, Clone)]
+struct Context<'scope, 'env, 'sys> {
+    environment: &'env Environment<'env, 'sys>,
+    scope: &'scope Scope<'scope, 'env, ()>,
+}
+
+
+/// Borrowed data used by the [`MultiThreadedExecutor`].
+struct Environment<'env, 'sys> {
+    executor: &'env MultiThreadedExecutor,
+    systems: &'sys [SyncUnsafeCell<BoxedSystem>],
+    conditions: Mutex<Conditions<'sys>>,
+    world_cell: UnsafeWorldCell<'env>,
+}
+
+impl<'env, 'sys> Environment<'env, 'sys> {
+    fn new(
+        executor: &'env MultiThreadedExecutor,
+        schedule: &'sys mut SystemSchedule,
+        world: &'env mut World,
+    ) -> Self {
+        Environment {
+            executor,
+            systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
+            conditions: Mutex::new(Conditions {
+                system_conditions: &mut schedule.system_conditions,
+                set_conditions: &mut schedule.set_conditions,
+                sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
+                systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
+            }),
+            world_cell: world.as_unsafe_world_cell(),
+        }
+    }
+}
+
+struct Conditions<'a> {
+    system_conditions: &'a mut [Vec<BoxedCondition>],
+    set_conditions: &'a mut [Vec<BoxedCondition>],
+    sets_with_conditions_of_systems: &'a [FixedBitSet],
+    systems_in_sets_with_conditions: &'a [FixedBitSet],
+}
+
 /// struct that contains all the data needed to run a system task
 #[derive(Clone)]
 struct SystemTask {
@@ -35,12 +82,15 @@ struct SystemTask {
     /// systems that are dependent on this one
     dependents: Vec<DependentSystem>,
 
-    archetype_component_access: Access<ArchetypeComponentId>,
+    is_send: bool,
+    is_exclusive: bool,
 
-    system_set_run_conditions: Vec<ThreadSafeRunCondition>,
-    // TODO, see if we can make this just a Vec<BoxedCondition>.
-    // Made it a ThreadSafeRunConditino because it needed to be clone
-    system_run_conditions: Vec<ThreadSafeRunCondition>,
+    // archetype_component_access: Access<ArchetypeComponentId>,
+
+    // system_set_run_conditions: Vec<ThreadSafeRunCondition>,
+    // // TODO, see if we can make this just a Vec<BoxedCondition>.
+    // // Made it a ThreadSafeRunConditino because it needed to be clone
+    // system_run_conditions: Vec<ThreadSafeRunCondition>,
 }
 
 impl SystemTask {
@@ -76,20 +126,16 @@ impl SystemTask {
         Self {
             system_id,
             dependency_finished_channel: finish_receive_channels[system_id].clone(),
-            dependencies_count: schedule.system_dependencies.len(),
+            dependencies_count: schedule.system_dependencies[system_id],
             dependents,
-            archetype_component_access: todo!(),
-            system_set_run_conditions: todo!(),
-            system_run_conditions: todo!(),
+            is_send: schedule.systems[system_id].is_send(),
+            is_exclusive: schedule.systems[system_id].is_exclusive(),
         }
     }
 
-    // TODO: need to feed the system in here somehow and then send it back after done
-    fn get_task<'scope, 'env: 'scope>(
+    fn get_task<'scope, 'env: 'scope, 'sys>(
         &'scope self,
-        systems: &'scope [SyncUnsafeCell<BoxedSystem>],
-        world_cell: UnsafeWorldCell<'scope>,
-        scope: &'scope Scope<'scope, 'env, ()>,
+        context: &'scope Context<'scope, 'env, 'sys>,
         mut shared_access: SharedSystemAccess,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'scope>> {
         let task = async move {
@@ -100,22 +146,25 @@ impl SystemTask {
                 count += 1;
             }
 
+            // SAFETY: this is the only task that accesses this system
+            let system = unsafe { &mut *context.environment.systems[self.system_id].get() };
+            system.update_archetype_component_access(context.environment.world_cell);
+
+            let archetype_component_access = system.archetype_component_access();
+
             // TODO: figure out when to call update_archetype_component_access for conditions and
             // the system
             // TODO: shared access should account for exclusive systems and non send systems
             shared_access
-                .wait_for_access(&self.archetype_component_access, self.system_id)
+                .wait_for_access(archetype_component_access, self.system_id)
                 .await;
 
             // SAFETY: shared access is holding locks for the data that all the run conditions access
-            if unsafe { self.should_run(world_cell) } {
+            if unsafe { self.should_run(context.environment) } {
                 // TODO: readd panic handling or fix in scope
 
-                // SAFETY: this is the only task that accesses this system
-                let system = unsafe { &mut *systems[self.system_id].get() };
-
                 // SAFETY: shared_access is holding locks for the data this system accesses
-                unsafe { system.run_unsafe((), world_cell) };
+                unsafe { system.run_unsafe((), context.environment.world_cell) };
             }
 
             // TODO: remove the access
@@ -132,16 +181,12 @@ impl SystemTask {
                         if first_dependent.is_none() {
                             // let task = system_task.clone();
                             first_dependent = Some(system_task.get_task(
-                                systems,
-                                world_cell,
-                                scope,
+                                context,
                                 shared_access.clone(),
                             ));
                         } else {
-                            scope.spawn(system_task.get_task(
-                                systems,
-                                world_cell,
-                                scope,
+                            context.scope.spawn(system_task.get_task(
+                                context,
                                 shared_access.clone(),
                             ));
                         }
@@ -166,16 +211,16 @@ impl SystemTask {
     ///   itself, and conditions for any of the system's sets.
     /// * `update_archetype_component` must have been called with `world`
     ///   for each run condition in `conditions`.
-    unsafe fn should_run(&self, world: UnsafeWorldCell) -> bool {
+    unsafe fn should_run(&self, env: &Environment<'_, '_>) -> bool {
         let mut should_run = true;
         for condition in self.system_set_run_conditions.iter() {
-            if !condition.can_run(world) {
+            if !condition.can_run(env.world_cell) {
                 should_run = false;
             }
         }
 
         for condition in self.system_run_conditions.iter() {
-            if unsafe { !condition.can_run(world) } {
+            if unsafe { !condition.can_run(env.world_cell) } {
                 should_run = false;
             }
         }
@@ -270,16 +315,18 @@ impl SystemExecutor for MultiThreadedExecutor {
             mut conditions,
         } = SyncUnsafeSchedule::new(schedule);
 
+        // wrap the schedule and the world to make it easier to pass between functions
+        let environment = &Environment::new(self, schedule, world);
+
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,
             thread_executor,
             |scope| {
-                let world_cell = world.as_unsafe_world_cell();
+                let context = Context { environment, scope };
+
                 for root in &self.roots {
                     scope.spawn(root.get_task(
-                        systems,
-                        world_cell,
-                        scope,
+                        &context,
                         self.shared_access.clone(),
                     ));
                 }
