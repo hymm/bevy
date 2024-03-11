@@ -39,6 +39,10 @@ impl SharedSystemAccess {
         }
         self.access_updated_send.broadcast(()).await.unwrap();
     }
+
+    pub fn can_run() {}
+
+    pub fn should_run() {}
 }
 
 impl Clone for SharedSystemAccess {

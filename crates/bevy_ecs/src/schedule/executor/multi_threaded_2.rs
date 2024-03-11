@@ -7,22 +7,19 @@ use std::{
 use async_channel::{Receiver, Sender};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool};
 use bevy_utils::syncunsafecell::SyncUnsafeCell;
+use dashmap::DashMap;
 use fixedbitset::FixedBitSet;
 // std once cell is not thread safe
 use once_cell::sync::OnceCell;
 
-use super::{
-    shared_access::SharedSystemAccess, ExecutorKind, MainThreadExecutor, SyncUnsafeSchedule,
-    SystemExecutor, SystemSchedule,
-};
+use super::{ExecutorKind, MainThreadExecutor, SyncUnsafeSchedule, SystemExecutor, SystemSchedule};
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
-    schedule::{BoxedCondition, NodeId},
+    schedule::{executor::multi_threaded::evaluate_and_fold_conditions, BoxedCondition},
     system::BoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
-
 
 /// References to data required by the executor.
 /// This is copied to each system task so that can invoke the executor when they complete.
@@ -34,12 +31,11 @@ struct Context<'scope, 'env, 'sys> {
     scope: &'scope Scope<'scope, 'env, ()>,
 }
 
-
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
     systems: &'sys [SyncUnsafeCell<BoxedSystem>],
-    conditions: Mutex<Conditions<'sys>>,
+    conditions: Conditions<'sys>,
     world_cell: UnsafeWorldCell<'env>,
 }
 
@@ -52,20 +48,23 @@ impl<'env, 'sys> Environment<'env, 'sys> {
         Environment {
             executor,
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
-            conditions: Mutex::new(Conditions {
-                system_conditions: &mut schedule.system_conditions,
-                set_conditions: &mut schedule.set_conditions,
+            conditions: Conditions {
+                system_conditions: SyncUnsafeCell::from_mut(
+                    schedule.system_conditions.as_mut_slice(),
+                )
+                .as_slice_of_cells(),
+                set_conditions: Arc::new(Mutex::new(&mut schedule.set_conditions)),
                 sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
                 systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
-            }),
+            },
             world_cell: world.as_unsafe_world_cell(),
         }
     }
 }
 
 struct Conditions<'a> {
-    system_conditions: &'a mut [Vec<BoxedCondition>],
-    set_conditions: &'a mut [Vec<BoxedCondition>],
+    system_conditions: &'a [SyncUnsafeCell<Vec<BoxedCondition>>],
+    set_conditions: Arc<Mutex<&'a mut [Vec<BoxedCondition>]>>,
     sets_with_conditions_of_systems: &'a [FixedBitSet],
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
@@ -85,8 +84,8 @@ struct SystemTask {
     is_send: bool,
     is_exclusive: bool,
 
-    // archetype_component_access: Access<ArchetypeComponentId>,
-
+    // TODO: move this to SystemAccess
+    archetype_component_access: Access<ArchetypeComponentId>,
     // system_set_run_conditions: Vec<ThreadSafeRunCondition>,
     // // TODO, see if we can make this just a Vec<BoxedCondition>.
     // // Made it a ThreadSafeRunConditino because it needed to be clone
@@ -94,7 +93,6 @@ struct SystemTask {
 }
 
 impl SystemTask {
-    /// buil
     fn new(
         system_id: usize,
         assigned_systems: &mut FixedBitSet,
@@ -130,13 +128,14 @@ impl SystemTask {
             dependents,
             is_send: schedule.systems[system_id].is_send(),
             is_exclusive: schedule.systems[system_id].is_exclusive(),
+            archetype_component_access: Default::default(),
         }
     }
 
     fn get_task<'scope, 'env: 'scope, 'sys>(
         &'scope self,
         context: &'scope Context<'scope, 'env, 'sys>,
-        mut shared_access: SharedSystemAccess,
+        mut executor: ExecutorState,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'scope>> {
         let task = async move {
             let mut count = 0;
@@ -146,28 +145,23 @@ impl SystemTask {
                 count += 1;
             }
 
-            // SAFETY: this is the only task that accesses this system
-            let system = unsafe { &mut *context.environment.systems[self.system_id].get() };
-            system.update_archetype_component_access(context.environment.world_cell);
-
-            let archetype_component_access = system.archetype_component_access();
-
-            // TODO: figure out when to call update_archetype_component_access for conditions and
-            // the system
-            // TODO: shared access should account for exclusive systems and non send systems
-            shared_access
-                .wait_for_access(archetype_component_access, self.system_id)
-                .await;
+            // take a lock on all the access needed for the system and it's run conditions
+            executor.wait_for_access(self, context.environment).await;
 
             // SAFETY: shared access is holding locks for the data that all the run conditions access
-            if unsafe { self.should_run(context.environment) } {
+            if unsafe { executor.should_run(self, context.environment) } {
                 // TODO: readd panic handling or fix in scope
 
+                // SAFETY: this is the only task that accesses this system
+                let system = unsafe { &mut *context.environment.systems[self.system_id].get() };
                 // SAFETY: shared_access is holding locks for the data this system accesses
                 unsafe { system.run_unsafe((), context.environment.world_cell) };
             }
 
-            // TODO: remove the access
+            // TODO: it might be better to have a drop guard for this and mirror the mutex api
+            executor.remove_access(self).await;
+
+            // TODO: if there are no dependents left we should run the
 
             // run dependencies
             let mut first_dependent = None;
@@ -177,24 +171,25 @@ impl SystemTask {
                         channel.send_blocking(()).unwrap();
                     }
                     DependentSystem::System(system_task) => {
-                        // TODO: handle exclusive systems and apply deferred.
-                        if first_dependent.is_none() {
-                            // let task = system_task.clone();
-                            first_dependent = Some(system_task.get_task(
-                                context,
-                                shared_access.clone(),
-                            ));
+                        if system_task.is_exclusive {
+                            context
+                                .scope
+                                .spawn_on_scope(system_task.get_task(context, executor.clone()));
+                        } else if !system_task.is_send {
+                            context
+                                .scope
+                                .spawn_on_external(system_task.get_task(context, executor.clone()));
+                        } else if first_dependent.is_none() {
+                            first_dependent = Some(system_task.get_task(context, executor.clone()));
                         } else {
-                            context.scope.spawn(system_task.get_task(
-                                context,
-                                shared_access.clone(),
-                            ));
+                            context
+                                .scope
+                                .spawn(system_task.get_task(context, executor.clone()));
                         }
                     }
                 }
             }
 
-            // TODO: we can probably unwrap this recursion into a loop somehow
             if let Some(task) = first_dependent {
                 task.await;
             }
@@ -204,28 +199,32 @@ impl SystemTask {
         Box::pin(task)
     }
 
-    // TODO: check the safety here
-    /// # Safety
-    /// * `world` must have permission to read any world data required by
-    ///   the system's conditions: this includes conditions for the system
-    ///   itself, and conditions for any of the system's sets.
-    /// * `update_archetype_component` must have been called with `world`
-    ///   for each run condition in `conditions`.
-    unsafe fn should_run(&self, env: &Environment<'_, '_>) -> bool {
-        let mut should_run = true;
-        for condition in self.system_set_run_conditions.iter() {
-            if !condition.can_run(env.world_cell) {
-                should_run = false;
+    fn update_access(&self, env: &Environment<'_, '_>, access: &mut SystemAccess) {
+        // TODO: we should early out if there are no new archetypes
+        let mut set_conditions = env.conditions.set_conditions.lock().unwrap();
+        for set_idx in env.conditions.sets_with_conditions_of_systems[self.system_id].ones()
+        // .difference(&access.evaluated_sets)
+        {
+            for condition in &mut set_conditions[set_idx] {
+                condition.update_archetype_component_access(env.world_cell);
+                // This is a bit pessimistic, since ones that might have been evaluated already are included
+                self.archetype_component_access
+                    .extend(condition.archetype_component_access());
             }
         }
 
-        for condition in self.system_run_conditions.iter() {
-            if unsafe { !condition.can_run(env.world_cell) } {
-                should_run = false;
-            }
+        // SAFETY: this is the only thread that is trying to start this system
+        let conditions = unsafe { &mut *env.conditions.system_conditions[self.system_id].get() };
+        for condition in conditions {
+            condition.update_archetype_component_access(env.world_cell);
+            self.archetype_component_access
+                .extend(condition.archetype_component_access());
         }
 
-        should_run
+        let system = unsafe { &mut *env.systems[self.system_id].get() };
+        system.update_archetype_component_access(env.world_cell);
+        self.archetype_component_access
+            .extend(system.archetype_component_access());
     }
 }
 
@@ -261,7 +260,7 @@ enum DependentSystem {
 }
 
 struct MultiThreadedExecutor {
-    shared_access: SharedSystemAccess,
+    shared_access: ExecutorState,
 
     roots: Vec<SystemTask>,
 
@@ -310,11 +309,6 @@ impl SystemExecutor for MultiThreadedExecutor {
             .map(|e| e.0.clone());
         let thread_executor = thread_executor.as_deref();
 
-        let SyncUnsafeSchedule {
-            systems,
-            mut conditions,
-        } = SyncUnsafeSchedule::new(schedule);
-
         // wrap the schedule and the world to make it easier to pass between functions
         let environment = &Environment::new(self, schedule, world);
 
@@ -325,10 +319,7 @@ impl SystemExecutor for MultiThreadedExecutor {
                 let context = Context { environment, scope };
 
                 for root in &self.roots {
-                    scope.spawn(root.get_task(
-                        &context,
-                        self.shared_access.clone(),
-                    ));
+                    scope.spawn(root.get_task(&context, self.shared_access.clone()));
                 }
             },
         );
@@ -348,5 +339,159 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn set_apply_final_deferred(&mut self, value: bool) {
         self.apply_final_deferred = value;
+    }
+}
+
+struct ExecutorState {
+    access: Arc<Mutex<SystemAccess>>,
+    access_updated_recv: async_broadcast::Receiver<()>,
+    access_updated_send: async_broadcast::Sender<()>,
+}
+
+impl Clone for ExecutorState {
+    fn clone(&self) -> Self {
+        Self {
+            access: self.access.clone(),
+            access_updated_recv: self.access_updated_recv.clone(),
+            access_updated_send: self.access_updated_send.clone(),
+        }
+    }
+}
+
+impl Default for ExecutorState {
+    fn default() -> Self {
+        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(1);
+        access_updated_send.set_overflow(true);
+
+        Self {
+            access: Default::default(),
+            access_updated_recv,
+            access_updated_send,
+        }
+    }
+}
+
+/// data of active running systems' acccess
+#[derive(Default)]
+struct SystemAccess {
+    access: Access<ArchetypeComponentId>,
+    /// active access
+    active_access: Arc<DashMap<usize, Access<ArchetypeComponentId>>>,
+    local_thread_running: bool,
+    // TODO: we should move these out into some thread safe evaluation
+    // /// sets that have already had their run conditions run
+    // evaluated_sets: FixedBitSet,
+    // /// systems whose set conditions evaluated to false earlier
+    // skipped_systems: FixedBitSet,
+}
+
+impl SystemAccess {
+    fn is_compatible(&self, system_meta: &SystemTask) -> bool {
+        if system_meta.is_exclusive && self.active_access.len() > 0 {
+            return false;
+        }
+
+        if !system_meta.is_send && self.local_thread_running {
+            return false;
+        }
+
+        self.access
+            .is_compatible(&system_meta.archetype_component_access)
+    }
+}
+
+impl ExecutorState {
+    pub async fn wait_for_access(&mut self, system_meta: &SystemTask, env: &Environment<'_, '_>) {
+        loop {
+            {
+                let mut access = self.access.lock().unwrap();
+                // TODO: should probalby update the access after checking if exclusive or non send
+                system_meta.update_access(env, &mut access);
+                if access.is_compatible(system_meta) {
+                    access
+                        .access
+                        .extend(&system_meta.archetype_component_access);
+                    // TODO: it'd be better if we could hold a reference to the cached access in the task
+                    // for cleanup instead of cloning here
+                    access.active_access.insert(
+                        system_meta.system_id,
+                        system_meta.archetype_component_access.clone(),
+                    );
+                    break;
+                }
+            }
+            self.access_updated_recv.recv().await.unwrap();
+        }
+    }
+
+    // use when system is finished running
+    pub async fn remove_access(&mut self, system_meta: &SystemTask) {
+        // TODO: this should also release the local_thread_running bit if needed
+        {
+            let mut access = self.access.lock().unwrap();
+            access.access.clear();
+            // TODO: it might be cleaner to keep a reference count of the read accesses, so we don't
+            // have to rebuild the whole access
+            access.active_access.remove(&system_meta.system_id);
+            let SystemAccess {
+                ref mut access,
+                ref active_access,
+                ..
+            } = *access;
+
+            active_access
+                .iter()
+                .for_each(|active_access| access.extend(&active_access));
+        }
+        self.access_updated_send.broadcast(()).await.unwrap();
+    }
+
+    unsafe fn should_run(&mut self, system_meta: &SystemTask, env: &Environment<'_, '_>) -> bool {
+        // TODO: figure out what to do to cache the set condition results without having to take the lock again
+        // let mut should_run = !self.access.skipped_systems.contains(system_meta.system_id);
+        let mut should_run = true;
+        let mut set_conditions = env.conditions.set_conditions.lock().unwrap();
+        for set_idx in env.conditions.sets_with_conditions_of_systems[system_meta.system_id].ones()
+        {
+            // if self.access.evaluated_sets.contains(set_idx) {
+            //     continue;
+            // }
+
+            // Evaluate the system set's conditions.
+            // SAFETY:
+            // - The caller ensures that `world` has permission to read any data
+            //   required by the conditions.
+            // - `update_archetype_component_access` has been called for each run condition.
+            let set_conditions_met = unsafe {
+                evaluate_and_fold_conditions(&mut set_conditions[set_idx], env.world_cell)
+            };
+
+            // if !set_conditions_met {
+            //     self.skipped_systems
+            //         .union_with(&env.conditions.systems_in_sets_with_conditions[set_idx]);
+            // }
+
+            should_run &= set_conditions_met;
+            // self.evaluated_sets.insert(set_idx);
+        }
+
+        let system_conditions =
+            unsafe { &mut *env.conditions.system_conditions[system_meta.system_id].get() };
+
+        // Evaluate the system's conditions.
+        // SAFETY:
+        // - The caller ensures that `world` has permission to read any data
+        //   required by the conditions.
+        // - `update_archetype_component_access` has been called for each run condition.
+        let system_conditions_met =
+            unsafe { evaluate_and_fold_conditions(system_conditions, env.world_cell) };
+
+        // if !system_conditions_met {
+        //     self.skipped_systems.insert(system_meta.system_id);
+        // }
+
+        should_run &= system_conditions_met;
+
+        should_run
     }
 }

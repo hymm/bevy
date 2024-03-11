@@ -17,7 +17,7 @@ use crate::{
     archetype::ArchetypeComponentId,
     prelude::Resource,
     query::Access,
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule, executor::SyncUnsafeSchedule},
+    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
     system::BoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -776,7 +776,7 @@ fn apply_deferred(
 ///   required by `conditions`.
 /// - `update_archetype_component_access` must have been called
 ///   with `world` for each condition in `conditions`.
-unsafe fn evaluate_and_fold_conditions(
+pub unsafe fn evaluate_and_fold_conditions(
     conditions: &mut [BoxedCondition],
     world: UnsafeWorldCell,
 ) -> bool {
