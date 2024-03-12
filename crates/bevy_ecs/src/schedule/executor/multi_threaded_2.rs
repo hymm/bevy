@@ -29,10 +29,7 @@ struct Environment<'env, 'sys> {
 }
 
 impl<'env, 'sys> Environment<'env, 'sys> {
-    fn new(
-        schedule: &'sys mut SystemSchedule,
-        world: &'env mut World,
-    ) -> Self {
+    fn new(schedule: &'sys mut SystemSchedule, world: &'env mut World) -> Self {
         Environment {
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
             conditions: Conditions {
@@ -95,14 +92,20 @@ impl SystemTask {
             .iter()
             .map(|dependent_id| {
                 if assigned_systems.contains(*dependent_id) {
-                    DependentSystem::NotificationChannel(finish_send_channels[*dependent_id].clone())
+                    DependentSystem::NotificationChannel(
+                        finish_send_channels[*dependent_id].clone(),
+                    )
                 } else {
-                    DependentSystem::System(SystemTask::new(
-                        *dependent_id,
-                        assigned_systems,
-                        schedule,
-                        finish_receive_channels,
-                        finish_send_channels,
+                    dbg!("dependent system");
+                    DependentSystem::System((
+                        finish_send_channels[*dependent_id].clone(),
+                        SystemTask::new(
+                            *dependent_id,
+                            assigned_systems,
+                            schedule,
+                            finish_receive_channels,
+                            finish_send_channels,
+                        ),
                     ))
                 }
             })
@@ -152,13 +155,15 @@ impl SystemTask {
             // TODO: if there are no dependents left we should run the
 
             // run dependencies
+            // FIX: should send finish to the dependent system too.
             let mut first_dependent = None;
             for dependent in &self.dependents {
                 match dependent {
                     DependentSystem::NotificationChannel(channel) => {
                         channel.send_blocking(()).unwrap();
                     }
-                    DependentSystem::System(system_task) => {
+                    DependentSystem::System((channel, system_task)) => {
+                        channel.send_blocking(()).unwrap();
                         if system_task.is_exclusive {
                             scope.spawn_on_scope(system_task.get_task(
                                 scope,
@@ -219,7 +224,7 @@ impl ThreadSafeRunCondition {
 enum DependentSystem {
     // channel to notify system that dependent is done.
     NotificationChannel(Sender<()>),
-    System(SystemTask),
+    System((Sender<()>, SystemTask)),
 }
 
 #[derive(Default)]
@@ -239,7 +244,6 @@ impl SystemExecutor for MultiThreadedExecutor {
     fn init(&mut self, schedule: &SystemSchedule) {
         let mut access = self.shared_access.access.lock().unwrap();
         access.system_access = Vec::with_capacity(schedule.systems.len());
-        
 
         // build list of channels indexed by node id.
         let mut finish_send_channels = Vec::with_capacity(schedule.systems.len());
@@ -257,6 +261,10 @@ impl SystemExecutor for MultiThreadedExecutor {
         // keep track of which systems have been processed
         let mut assigned_systems = FixedBitSet::with_capacity(schedule.systems.len());
         for root in &schedule.roots {
+            if assigned_systems.contains(root.index()) {
+                dbg!("something went wrong root was already assigned");
+                continue;
+            }
             self.roots.push(SystemTask::new(
                 root.index(),
                 &mut assigned_systems,
@@ -449,6 +457,7 @@ impl ExecutorState {
         // TODO: figure out what to do to cache the set condition results without having to take the lock again
         // let mut should_run = !self.access.skipped_systems.contains(system_meta.system_id);
         let mut should_run = true;
+        // TODO: don't take this lock if there are no set_conditions
         let mut set_conditions = env.conditions.set_conditions.lock().unwrap();
         for set_idx in env.conditions.sets_with_conditions_of_systems[system_meta.system_id].ones()
         {

@@ -152,7 +152,9 @@ fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
     match kind {
         ExecutorKind::Simple => Box::new(SimpleExecutor::new()),
         ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
-        ExecutorKind::MultiThreaded => Box::new(executor::multi_threaded_2::MultiThreadedExecutor::default()),
+        ExecutorKind::MultiThreaded => {
+            Box::new(executor::multi_threaded_2::MultiThreadedExecutor::default())
+        }
     }
 }
 
@@ -365,7 +367,7 @@ impl Schedule {
             self.graph.changed = false;
             self.executor_initialized = false;
         }
-
+        dbg!(self.label);
         if !self.executor_initialized {
             self.executor.init(&self.executable);
             self.executor_initialized = true;
