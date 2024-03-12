@@ -12,7 +12,7 @@ use fixedbitset::FixedBitSet;
 // std once cell is not thread safe
 use once_cell::sync::OnceCell;
 
-use super::{ExecutorKind, MainThreadExecutor, SyncUnsafeSchedule, SystemExecutor, SystemSchedule};
+use super::{ExecutorKind, MainThreadExecutor, SystemExecutor, SystemSchedule};
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
@@ -21,19 +21,8 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
-/// References to data required by the executor.
-/// This is copied to each system task so that can invoke the executor when they complete.
-// These all need to outlive 'scope in order to be sent to new tasks,
-// and keeping them all in a struct means we can use lifetime elision.
-#[derive(Copy, Clone)]
-struct Context<'scope, 'env, 'sys> {
-    environment: &'env Environment<'env, 'sys>,
-    scope: &'scope Scope<'scope, 'env, ()>,
-}
-
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
-    executor: &'env MultiThreadedExecutor,
     systems: &'sys [SyncUnsafeCell<BoxedSystem>],
     conditions: Conditions<'sys>,
     world_cell: UnsafeWorldCell<'env>,
@@ -41,12 +30,10 @@ struct Environment<'env, 'sys> {
 
 impl<'env, 'sys> Environment<'env, 'sys> {
     fn new(
-        executor: &'env MultiThreadedExecutor,
         schedule: &'sys mut SystemSchedule,
         world: &'env mut World,
     ) -> Self {
         Environment {
-            executor,
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
             conditions: Conditions {
                 system_conditions: SyncUnsafeCell::from_mut(
@@ -55,7 +42,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
                 .as_slice_of_cells(),
                 set_conditions: Arc::new(Mutex::new(&mut schedule.set_conditions)),
                 sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
-                systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
+                // systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
             },
             world_cell: world.as_unsafe_world_cell(),
         }
@@ -66,7 +53,7 @@ struct Conditions<'a> {
     system_conditions: &'a [SyncUnsafeCell<Vec<BoxedCondition>>],
     set_conditions: Arc<Mutex<&'a mut [Vec<BoxedCondition>]>>,
     sets_with_conditions_of_systems: &'a [FixedBitSet],
-    systems_in_sets_with_conditions: &'a [FixedBitSet],
+    // systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
 
 /// struct that contains all the data needed to run a system task
@@ -106,12 +93,12 @@ impl SystemTask {
         // take the system if available, or use the channel if not
         let dependents = dependents
             .iter()
-            .map(|d| {
-                if assigned_systems.contains(*d) {
-                    DependentSystem::NotificationChannel(finish_send_channels[*d].clone())
+            .map(|dependent_id| {
+                if assigned_systems.contains(*dependent_id) {
+                    DependentSystem::NotificationChannel(finish_send_channels[*dependent_id].clone())
                 } else {
                     DependentSystem::System(SystemTask::new(
-                        *d,
+                        *dependent_id,
                         assigned_systems,
                         schedule,
                         finish_receive_channels,
@@ -251,12 +238,8 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn init(&mut self, schedule: &SystemSchedule) {
         let mut access = self.shared_access.access.lock().unwrap();
-        let allocate = schedule
-            .systems
-            .len()
-            .saturating_sub(access.system_access.len());
-        access.system_access.reserve_exact(allocate);
-        // TODO: reinitialize all the system accesses here
+        access.system_access = Vec::with_capacity(schedule.systems.len());
+        
 
         // build list of channels indexed by node id.
         let mut finish_send_channels = Vec::with_capacity(schedule.systems.len());
@@ -266,6 +249,8 @@ impl SystemExecutor for MultiThreadedExecutor {
             let (send, receive) = async_channel::bounded(schedule.systems.len());
             finish_send_channels.push(send);
             finish_receive_channels.push(receive);
+            // TODO: reinitialize all the system accesses here
+            access.system_access.push(Default::default());
         }
 
         self.roots = Vec::new();
@@ -295,7 +280,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         let thread_executor = thread_executor.as_deref();
 
         // wrap the schedule and the world to make it easier to pass between functions
-        let environment = &Environment::new(self, schedule, world);
+        let environment = &Environment::new(schedule, world);
 
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,

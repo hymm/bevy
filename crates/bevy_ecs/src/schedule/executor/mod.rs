@@ -1,6 +1,5 @@
 mod multi_threaded;
 pub mod multi_threaded_2;
-mod shared_access;
 mod simple;
 mod single_threaded;
 
@@ -8,7 +7,6 @@ pub use self::multi_threaded::{MainThreadExecutor, MultiThreadedExecutor};
 pub use self::simple::SimpleExecutor;
 pub use self::single_threaded::SingleThreadedExecutor;
 
-use bevy_utils::syncunsafecell::SyncUnsafeCell;
 use fixedbitset::FixedBitSet;
 
 use crate::{
@@ -126,32 +124,6 @@ pub(super) fn is_apply_deferred(system: &BoxedSystem) -> bool {
     system.as_ref().type_id() == apply_deferred.system_type_id()
 }
 
-/// A funky borrow split of [`SystemSchedule`] required by the [`MultiThreadedExecutor`].
-struct SyncUnsafeSchedule<'a> {
-    systems: &'a [SyncUnsafeCell<BoxedSystem>],
-    conditions: Conditions<'a>,
-}
-
-struct Conditions<'a> {
-    system_conditions: &'a mut [Vec<BoxedCondition>],
-    set_conditions: &'a mut [Vec<BoxedCondition>],
-    sets_with_conditions_of_systems: &'a [FixedBitSet],
-    systems_in_sets_with_conditions: &'a [FixedBitSet],
-}
-
-impl SyncUnsafeSchedule<'_> {
-    fn new(schedule: &mut SystemSchedule) -> SyncUnsafeSchedule<'_> {
-        SyncUnsafeSchedule {
-            systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
-            conditions: Conditions {
-                system_conditions: &mut schedule.system_conditions,
-                set_conditions: &mut schedule.set_conditions,
-                sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
-                systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
-            },
-        }
-    }
-}
 /// These functions hide the bottom of the callstack from `RUST_BACKTRACE=1` (assuming the default panic handler is used).
 /// The full callstack will still be visible with `RUST_BACKTRACE=full`.
 /// They are specialized for `System::run` & co instead of being generic over closures because this avoids an
