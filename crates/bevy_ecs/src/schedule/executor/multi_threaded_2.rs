@@ -198,34 +198,6 @@ impl SystemTask {
         // let task = task.instrument(self.system_task_span)
         Box::pin(task)
     }
-
-    fn update_access(&self, env: &Environment<'_, '_>, access: &mut SystemAccess) {
-        // TODO: we should early out if there are no new archetypes
-        let mut set_conditions = env.conditions.set_conditions.lock().unwrap();
-        for set_idx in env.conditions.sets_with_conditions_of_systems[self.system_id].ones()
-        // .difference(&access.evaluated_sets)
-        {
-            for condition in &mut set_conditions[set_idx] {
-                condition.update_archetype_component_access(env.world_cell);
-                // This is a bit pessimistic, since ones that might have been evaluated already are included
-                self.archetype_component_access
-                    .extend(condition.archetype_component_access());
-            }
-        }
-
-        // SAFETY: this is the only thread that is trying to start this system
-        let conditions = unsafe { &mut *env.conditions.system_conditions[self.system_id].get() };
-        for condition in conditions {
-            condition.update_archetype_component_access(env.world_cell);
-            self.archetype_component_access
-                .extend(condition.archetype_component_access());
-        }
-
-        let system = unsafe { &mut *env.systems[self.system_id].get() };
-        system.update_archetype_component_access(env.world_cell);
-        self.archetype_component_access
-            .extend(system.archetype_component_access());
-    }
 }
 
 #[derive(Clone)]
@@ -273,6 +245,14 @@ impl SystemExecutor for MultiThreadedExecutor {
     }
 
     fn init(&mut self, schedule: &SystemSchedule) {
+        let mut access = self.shared_access.access.lock().unwrap();
+        let allocate = schedule
+            .systems
+            .len()
+            .saturating_sub(access.system_access.len());
+        access.system_access.reserve_exact(allocate);
+        // TODO: reinitialize all the system accesses here
+
         // build list of channels indexed by node id.
         let mut finish_send_channels = Vec::with_capacity(schedule.systems.len());
         let mut finish_receive_channels = Vec::with_capacity(schedule.systems.len());
@@ -378,6 +358,8 @@ struct SystemAccess {
     /// active access
     active_access: Arc<DashMap<usize, Access<ArchetypeComponentId>>>,
     local_thread_running: bool,
+    // TODO: can this be a slice
+    system_access: Vec<SyncUnsafeCell<Access<ArchetypeComponentId>>>,
     // TODO: we should move these out into some thread safe evaluation
     // /// sets that have already had their run conditions run
     // evaluated_sets: FixedBitSet,
@@ -398,6 +380,34 @@ impl SystemAccess {
         self.access
             .is_compatible(&system_meta.archetype_component_access)
     }
+
+    fn update_access(&mut self, env: &Environment<'_, '_>, system_task: &SystemTask) {
+        let archetype_component_access =
+            unsafe { &mut *self.system_access[system_task.system_id].get() };
+        // TODO: we should early out if there are no new archetypes
+        let mut set_conditions = env.conditions.set_conditions.lock().unwrap();
+        for set_idx in env.conditions.sets_with_conditions_of_systems[system_task.system_id].ones()
+        // .difference(&access.evaluated_sets)
+        {
+            for condition in &mut set_conditions[set_idx] {
+                condition.update_archetype_component_access(env.world_cell);
+                // This is a bit pessimistic, since ones that might have been evaluated already are included
+                archetype_component_access.extend(condition.archetype_component_access());
+            }
+        }
+
+        // SAFETY: this is the only thread that is trying to start this system
+        let conditions =
+            unsafe { &mut *env.conditions.system_conditions[system_task.system_id].get() };
+        for condition in conditions {
+            condition.update_archetype_component_access(env.world_cell);
+            archetype_component_access.extend(condition.archetype_component_access());
+        }
+
+        let system = unsafe { &mut *env.systems[system_task.system_id].get() };
+        system.update_archetype_component_access(env.world_cell);
+        archetype_component_access.extend(system.archetype_component_access());
+    }
 }
 
 impl ExecutorState {
@@ -406,7 +416,7 @@ impl ExecutorState {
             {
                 let mut access = self.access.lock().unwrap();
                 // TODO: should probalby update the access after checking if exclusive or non send
-                system_meta.update_access(env, &mut access);
+                access.update_access(env, system_meta);
                 if access.is_compatible(system_meta) {
                     access
                         .access
