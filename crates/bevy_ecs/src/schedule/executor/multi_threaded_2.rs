@@ -134,7 +134,8 @@ impl SystemTask {
 
     fn get_task<'scope, 'env: 'scope, 'sys>(
         &'scope self,
-        context: &'scope Context<'scope, 'env, 'sys>,
+        scope: &'scope Scope<'scope, 'env, ()>,
+        env: &'env Environment,
         mut executor: ExecutorState,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'scope>> {
         let task = async move {
@@ -146,16 +147,16 @@ impl SystemTask {
             }
 
             // take a lock on all the access needed for the system and it's run conditions
-            executor.wait_for_access(self, context.environment).await;
+            executor.wait_for_access(self, env).await;
 
             // SAFETY: shared access is holding locks for the data that all the run conditions access
-            if unsafe { executor.should_run(self, context.environment) } {
+            if unsafe { executor.should_run(self, env) } {
                 // TODO: readd panic handling or fix in scope
 
                 // SAFETY: this is the only task that accesses this system
-                let system = unsafe { &mut *context.environment.systems[self.system_id].get() };
+                let system = unsafe { &mut *env.systems[self.system_id].get() };
                 // SAFETY: shared_access is holding locks for the data this system accesses
-                unsafe { system.run_unsafe((), context.environment.world_cell) };
+                unsafe { system.run_unsafe((), env.world_cell) };
             }
 
             // TODO: it might be better to have a drop guard for this and mirror the mutex api
@@ -172,19 +173,22 @@ impl SystemTask {
                     }
                     DependentSystem::System(system_task) => {
                         if system_task.is_exclusive {
-                            context
-                                .scope
-                                .spawn_on_scope(system_task.get_task(context, executor.clone()));
+                            scope.spawn_on_scope(system_task.get_task(
+                                scope,
+                                env,
+                                executor.clone(),
+                            ));
                         } else if !system_task.is_send {
-                            context
-                                .scope
-                                .spawn_on_external(system_task.get_task(context, executor.clone()));
+                            scope.spawn_on_external(system_task.get_task(
+                                scope,
+                                env,
+                                executor.clone(),
+                            ));
                         } else if first_dependent.is_none() {
-                            first_dependent = Some(system_task.get_task(context, executor.clone()));
+                            first_dependent =
+                                Some(system_task.get_task(scope, env, executor.clone()));
                         } else {
-                            context
-                                .scope
-                                .spawn(system_task.get_task(context, executor.clone()));
+                            scope.spawn(system_task.get_task(scope, env, executor.clone()));
                         }
                     }
                 }
@@ -296,10 +300,9 @@ impl SystemExecutor for MultiThreadedExecutor {
             false,
             thread_executor,
             |scope| {
-                let context = Context { environment, scope };
-
+                // TODO: spawn the root tasks from multiple threads
                 for root in &self.roots {
-                    scope.spawn(root.get_task(&context, self.shared_access.clone()));
+                    scope.spawn(root.get_task(scope, &environment, self.shared_access.clone()));
                 }
             },
         );
