@@ -152,7 +152,7 @@ fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
     match kind {
         ExecutorKind::Simple => Box::new(SimpleExecutor::new()),
         ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
-        ExecutorKind::MultiThreaded => Box::new(MultiThreadedExecutor::new()),
+        ExecutorKind::MultiThreaded => Box::new(executor::multi_threaded_2::MultiThreadedExecutor::default()),
     }
 }
 

@@ -235,7 +235,8 @@ enum DependentSystem {
     System(SystemTask),
 }
 
-struct MultiThreadedExecutor {
+#[derive(Default)]
+pub struct MultiThreadedExecutor {
     shared_access: ExecutorState,
 
     roots: Vec<SystemTask>,
@@ -245,7 +246,7 @@ struct MultiThreadedExecutor {
 
 impl SystemExecutor for MultiThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
-        todo!()
+        ExecutorKind::MultiThreaded
     }
 
     fn init(&mut self, schedule: &SystemSchedule) {

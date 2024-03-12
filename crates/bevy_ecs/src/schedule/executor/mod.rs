@@ -1,5 +1,5 @@
 mod multi_threaded;
-mod multi_threaded_2;
+pub mod multi_threaded_2;
 mod shared_access;
 mod simple;
 mod single_threaded;
