@@ -95,8 +95,10 @@ where
     }
 
     #[inline]
-    unsafe fn run_unsafe(&mut self, _input: Self::In, _world: UnsafeWorldCell) -> Self::Out {
-        panic!("Cannot run exclusive systems with a shared World reference");
+    unsafe fn run_unsafe(&mut self, input: Self::In, world: UnsafeWorldCell) -> Self::Out {
+        // SAFETY: Caller upholds that no other references exist to world.
+        let world = unsafe { world.world_mut() };
+        self.run(input, world)
     }
 
     fn run(&mut self, input: Self::In, world: &mut World) -> Self::Out {

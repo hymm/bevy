@@ -1,5 +1,7 @@
 use std::{
+    any::Any,
     future::Future,
+    panic::AssertUnwindSafe,
     pin::Pin,
     sync::{Arc, Mutex},
 };
@@ -12,7 +14,7 @@ use fixedbitset::FixedBitSet;
 // std once cell is not thread safe
 use once_cell::sync::OnceCell;
 
-use super::{ExecutorKind, MainThreadExecutor, SystemExecutor, SystemSchedule};
+use super::{is_apply_deferred, ExecutorKind, MainThreadExecutor, SystemExecutor, SystemSchedule};
 use crate::{
     archetype::ArchetypeComponentId,
     query::Access,
@@ -141,17 +143,20 @@ impl SystemTask {
             // SAFETY: shared access is holding locks for the data that all the run conditions access
             if unsafe { executor.should_run(self, env) } {
                 // TODO: readd panic handling or fix in scope
-
                 // SAFETY: this is the only task that accesses this system
                 let system = unsafe { &mut *env.systems[self.system_id].get() };
-                // SAFETY: shared_access is holding locks for the data this system accesses
-                unsafe { system.run_unsafe((), env.world_cell) };
+                if is_apply_deferred(system) {
+                    let _ = apply_deferred(env);
+                } else {
+                    // SAFETY: shared_access is holding locks for the data this system accesses
+                    unsafe { system.run_unsafe((), env.world_cell) };
+                }
             }
 
             // TODO: it might be better to have a drop guard for this and mirror the mutex api
             executor.remove_access(self).await;
 
-            // TODO: if there are no dependents left we should run the
+            // TODO: if there are no dependents left we should run another root
 
             // run dependencies
             // FIX: should send finish to the dependent system too.
@@ -164,12 +169,14 @@ impl SystemTask {
                     DependentSystem::System((channel, system_task)) => {
                         channel.send_blocking(()).unwrap();
                         if system_task.is_exclusive {
+                            // TODO: this should handle apply_system_buffers
                             scope.spawn_on_scope(system_task.get_task(
                                 scope,
                                 env,
                                 executor.clone(),
                             ));
                         } else if !system_task.is_send {
+                            dbg!("spawn non send system");
                             scope.spawn_on_external(system_task.get_task(
                                 scope,
                                 env,
@@ -226,13 +233,22 @@ enum DependentSystem {
     System((Sender<()>, SystemTask)),
 }
 
-#[derive(Default)]
 pub struct MultiThreadedExecutor {
     shared_access: ExecutorState,
 
     roots: Vec<SystemTask>,
 
     apply_final_deferred: bool,
+}
+
+impl Default for MultiThreadedExecutor {
+    fn default() -> Self {
+        Self {
+            shared_access: Default::default(),
+            roots: Default::default(),
+            apply_final_deferred: true,
+        }
+    }
 }
 
 impl SystemExecutor for MultiThreadedExecutor {
@@ -265,7 +281,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             }
             // make sure we're not grabbing a root twice as that would be unsafe
             assert!(!assigned_systems.contains(system_id.index()));
-            
+
             self.roots.push(SystemTask::new(
                 system_id.index(),
                 &mut assigned_systems,
@@ -303,9 +319,9 @@ impl SystemExecutor for MultiThreadedExecutor {
         );
 
         if self.apply_final_deferred {
-            // // Do one final apply buffers after all systems have completed
-            // // Commands should be applied while on the scope's thread, not the executor's thread
-            // let res = apply_deferred(&self.unapplied_systems, systems, world);
+            // Do one final apply buffers after all systems have completed
+            // Commands should be applied while on the scope's thread, not the executor's thread
+            let _res = apply_deferred(&environment);
             // if let Err(payload) = res {
             //     let mut panic_payload = self.panic_payload.lock().unwrap();
             //     *panic_payload = Some(payload);
@@ -338,7 +354,8 @@ impl Clone for ExecutorState {
 
 impl Default for ExecutorState {
     fn default() -> Self {
-        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(1);
+        // TODO: set this to sytems.len()
+        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(100);
         access_updated_send.set_overflow(true);
 
         Self {
@@ -503,4 +520,23 @@ impl ExecutorState {
 
         should_run
     }
+}
+
+fn apply_deferred(env: &Environment) -> Result<(), Box<dyn Any + Send>> {
+    let world = unsafe { env.world_cell.world_mut() };
+    for system in env.systems {
+        // SAFETY: none of these systems are running, no other references exist
+        let system = unsafe { &mut *system.get() };
+        let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            system.apply_deferred(world);
+        }));
+        if let Err(payload) = res {
+            eprintln!(
+                "Encountered a panic when applying buffers for system `{}`!",
+                &*system.name()
+            );
+            return Err(payload);
+        }
+    }
+    Ok(())
 }
