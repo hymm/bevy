@@ -76,6 +76,7 @@ struct SystemTask {
     // // TODO, see if we can make this just a Vec<BoxedCondition>.
     // // Made it a ThreadSafeRunConditino because it needed to be clone
     // system_run_conditions: Vec<ThreadSafeRunCondition>,
+    name: String,
 }
 
 impl SystemTask {
@@ -86,6 +87,7 @@ impl SystemTask {
         finish_receive_channels: &Vec<Receiver<()>>,
         finish_send_channels: &Vec<Sender<()>>,
     ) -> Self {
+        // TODO: figure out how these SystemSchedule data structures are indexed. I think my assumptions are wrong and they are all in the same order.
         assigned_systems.set(system_id, true);
 
         let dependents = &schedule.system_dependents[system_id];
@@ -112,10 +114,6 @@ impl SystemTask {
             })
             .collect();
 
-        if !schedule.systems[system_id].is_send() && !schedule.systems[system_id].is_exclusive() {
-            dbg!(schedule.systems[system_id].default_system_sets());
-        }
-
         Self {
             system_id,
             dependency_finished_channel: finish_receive_channels[system_id].clone(),
@@ -124,6 +122,12 @@ impl SystemTask {
             is_send: schedule.systems[system_id].is_send(),
             is_exclusive: schedule.systems[system_id].is_exclusive(),
             archetype_component_access: Default::default(),
+            name: format!("{:?}", schedule.systems[system_id].default_system_sets()),                
+            #[cfg(feature = "trace")]
+            system_task_span: info_span!(
+                "system_task",
+                name = &*schedule.systems[system_id].name()
+            ),
         }
     }
 
@@ -152,6 +156,7 @@ impl SystemTask {
                 if is_apply_deferred(system) {
                     let _ = apply_deferred(env);
                 } else {
+                    assert_eq!(self.name, format!("{:?}", system.default_system_sets()));
                     // SAFETY: shared_access is holding locks for the data this system accesses
                     unsafe { system.run_unsafe((), env.world_cell) };
                 }
@@ -172,9 +177,6 @@ impl SystemTask {
                     }
                     DependentSystem::System((channel, system_task)) => {
                         // TODO:  remove this send_blocking and just subtract 1 from the dependency_count
-                        if !system_task.is_exclusive {
-                            dbg!(system_task.is_send);
-                        }
                         channel.send_blocking(()).unwrap();
                         if system_task.is_exclusive {
                             // TODO: this should handle apply_system_buffers
@@ -283,15 +285,15 @@ impl SystemExecutor for MultiThreadedExecutor {
         self.roots = Vec::new();
         // keep track of which systems have been processed
         let mut assigned_systems = FixedBitSet::with_capacity(schedule.systems.len());
-        for system_id in &schedule.system_ids {
-            if schedule.system_dependencies[system_id.index()] != 0 {
+        for id in 0..schedule.systems.len() {
+            if schedule.system_dependencies[id] != 0 {
                 continue;
             }
             // make sure we're not grabbing a root twice as that would be unsafe
-            assert!(!assigned_systems.contains(system_id.index()));
+            assert!(!assigned_systems.contains(id));
 
             self.roots.push(SystemTask::new(
-                system_id.index(),
+                id,
                 &mut assigned_systems,
                 schedule,
                 &finish_receive_channels,
@@ -321,6 +323,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             |scope| {
                 // TODO: spawn the root tasks from multiple threads
                 for root in &self.roots {
+                    // TODO: This needs to handle spawning with the right method
                     scope.spawn(root.get_task(scope, &environment, self.shared_access.clone()));
                 }
             },
