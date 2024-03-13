@@ -112,6 +112,10 @@ impl SystemTask {
             })
             .collect();
 
+        if !schedule.systems[system_id].is_send() && !schedule.systems[system_id].is_exclusive() {
+            dbg!(schedule.systems[system_id].default_system_sets());
+        }
+
         Self {
             system_id,
             dependency_finished_channel: finish_receive_channels[system_id].clone(),
@@ -167,6 +171,10 @@ impl SystemTask {
                         channel.send_blocking(()).unwrap();
                     }
                     DependentSystem::System((channel, system_task)) => {
+                        // TODO:  remove this send_blocking and just subtract 1 from the dependency_count
+                        if !system_task.is_exclusive {
+                            dbg!(system_task.is_send);
+                        }
                         channel.send_blocking(()).unwrap();
                         if system_task.is_exclusive {
                             // TODO: this should handle apply_system_buffers

@@ -1462,7 +1462,6 @@ impl ScheduleGraph {
             system_dependents,
             sets_with_conditions_of_systems,
             systems_in_sets_with_conditions,
-            roots: self.roots.clone(),
         }
     }
 

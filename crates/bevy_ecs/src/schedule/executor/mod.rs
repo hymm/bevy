@@ -74,8 +74,6 @@ pub struct SystemSchedule {
     pub(super) set_conditions: Vec<Vec<BoxedCondition>>,
     /// Indexed by system set node id.
     pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
-    /// List of roots by system ids
-    pub(super) roots: Vec<NodeId>,
 }
 
 impl SystemSchedule {
@@ -91,7 +89,6 @@ impl SystemSchedule {
             system_dependents: Vec::new(),
             sets_with_conditions_of_systems: Vec::new(),
             systems_in_sets_with_conditions: Vec::new(),
-            roots: Vec::new(),
         }
     }
 }
