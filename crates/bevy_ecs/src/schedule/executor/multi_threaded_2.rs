@@ -96,7 +96,6 @@ impl SystemTask {
                         finish_send_channels[*dependent_id].clone(),
                     )
                 } else {
-                    dbg!("dependent system");
                     DependentSystem::System((
                         finish_send_channels[*dependent_id].clone(),
                         SystemTask::new(
@@ -260,13 +259,15 @@ impl SystemExecutor for MultiThreadedExecutor {
         self.roots = Vec::new();
         // keep track of which systems have been processed
         let mut assigned_systems = FixedBitSet::with_capacity(schedule.systems.len());
-        for root in &schedule.roots {
-            if assigned_systems.contains(root.index()) {
-                dbg!("something went wrong root was already assigned");
+        for system_id in &schedule.system_ids {
+            if schedule.system_dependencies[system_id.index()] != 0 {
                 continue;
             }
+            // make sure we're not grabbing a root twice as that would be unsafe
+            assert!(!assigned_systems.contains(system_id.index()));
+            
             self.roots.push(SystemTask::new(
-                root.index(),
+                system_id.index(),
                 &mut assigned_systems,
                 schedule,
                 &finish_receive_channels,
