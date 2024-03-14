@@ -76,7 +76,6 @@ struct SystemTask {
     // // TODO, see if we can make this just a Vec<BoxedCondition>.
     // // Made it a ThreadSafeRunConditino because it needed to be clone
     // system_run_conditions: Vec<ThreadSafeRunCondition>,
-    name: String,
 }
 
 impl SystemTask {
@@ -121,8 +120,7 @@ impl SystemTask {
             dependents,
             is_send: schedule.systems[system_id].is_send(),
             is_exclusive: schedule.systems[system_id].is_exclusive(),
-            archetype_component_access: Default::default(),
-            name: format!("{:?}", schedule.systems[system_id].default_system_sets()),                
+            archetype_component_access: Default::default(),              
             #[cfg(feature = "trace")]
             system_task_span: info_span!(
                 "system_task",
@@ -154,9 +152,9 @@ impl SystemTask {
                 // SAFETY: this is the only task that accesses this system
                 let system = unsafe { &mut *env.systems[self.system_id].get() };
                 if is_apply_deferred(system) {
+                    // TODO: should only need to do this when it's an exclusive system
                     let _ = apply_deferred(env);
                 } else {
-                    assert_eq!(self.name, format!("{:?}", system.default_system_sets()));
                     // SAFETY: shared_access is holding locks for the data this system accesses
                     unsafe { system.run_unsafe((), env.world_cell) };
                 }
@@ -179,14 +177,12 @@ impl SystemTask {
                         // TODO:  remove this send_blocking and just subtract 1 from the dependency_count
                         channel.send_blocking(()).unwrap();
                         if system_task.is_exclusive {
-                            // TODO: this should handle apply_system_buffers
                             scope.spawn_on_scope(system_task.get_task(
                                 scope,
                                 env,
                                 executor.clone(),
                             ));
                         } else if !system_task.is_send {
-                            dbg!("spawn non send system");
                             scope.spawn_on_external(system_task.get_task(
                                 scope,
                                 env,
@@ -323,8 +319,22 @@ impl SystemExecutor for MultiThreadedExecutor {
             |scope| {
                 // TODO: spawn the root tasks from multiple threads
                 for root in &self.roots {
-                    // TODO: This needs to handle spawning with the right method
-                    scope.spawn(root.get_task(scope, &environment, self.shared_access.clone()));
+                    if root.is_exclusive {
+                        scope.spawn_on_scope(root.get_task(
+                            scope,
+                            environment,
+                            self.shared_access.clone(),
+                        ));
+                    } else if !root.is_send {
+                        dbg!("spawn non send system");
+                        scope.spawn_on_external(root.get_task(
+                            scope,
+                            environment,
+                            self.shared_access.clone(),
+                        ));
+                    } else {
+                        scope.spawn(root.get_task(scope, environment, self.shared_access.clone()));
+                    }
                 }
             },
         );
@@ -366,7 +376,7 @@ impl Clone for ExecutorState {
 impl Default for ExecutorState {
     fn default() -> Self {
         // TODO: set this to sytems.len()
-        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(100);
+        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(1000);
         access_updated_send.set_overflow(true);
 
         Self {

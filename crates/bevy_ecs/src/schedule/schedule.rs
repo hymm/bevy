@@ -367,7 +367,6 @@ impl Schedule {
             self.graph.changed = false;
             self.executor_initialized = false;
         }
-        dbg!(self.label);
         if !self.executor_initialized {
             self.executor.init(&self.executable);
             self.executor_initialized = true;
