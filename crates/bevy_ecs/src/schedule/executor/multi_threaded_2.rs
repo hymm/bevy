@@ -326,7 +326,6 @@ impl SystemExecutor for MultiThreadedExecutor {
                             self.shared_access.clone(),
                         ));
                     } else if !root.is_send {
-                        dbg!("spawn non send system");
                         scope.spawn_on_external(root.get_task(
                             scope,
                             environment,
@@ -365,10 +364,15 @@ struct ExecutorState {
 
 impl Clone for ExecutorState {
     fn clone(&self) -> Self {
+        let mut access_updated_recv = self.access_updated_recv.clone();
+        let mut access_updated_send = self.access_updated_send.clone();
+        assert!(access_updated_recv.overflow());
+        assert!(access_updated_send.overflow());
+
         Self {
             access: self.access.clone(),
-            access_updated_recv: self.access_updated_recv.clone(),
-            access_updated_send: self.access_updated_send.clone(),
+            access_updated_recv,
+            access_updated_send,
         }
     }
 }
@@ -376,8 +380,9 @@ impl Clone for ExecutorState {
 impl Default for ExecutorState {
     fn default() -> Self {
         // TODO: set this to sytems.len()
-        let (mut access_updated_send, access_updated_recv) = async_broadcast::broadcast(1000);
+        let (mut access_updated_send, mut access_updated_recv) = async_broadcast::broadcast(1);
         access_updated_send.set_overflow(true);
+        access_updated_recv.set_overflow(true);
 
         Self {
             access: Default::default(),
@@ -466,7 +471,14 @@ impl ExecutorState {
                     break;
                 }
             }
-            self.access_updated_recv.recv().await.unwrap();
+            let result = self.access_updated_recv.recv().await;
+            match result {
+                Ok(_) => {},
+                Err(err) => match err {
+                    async_broadcast::RecvError::Overflowed(_) => {}, // ignore if overflowed
+                    async_broadcast::RecvError::Closed => panic!("channel is unexpectedly closed!"),
+                },
+            }
         }
     }
 
