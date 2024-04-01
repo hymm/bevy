@@ -2945,6 +2945,16 @@ impl World {
     }
 }
 
+struct TakenEntity {
+
+}
+
+impl World {
+    pub fn take(&mut self, entity: Entity) -> Option<TakenEntity> {
+
+    }
+}
+
 impl fmt::Debug for World {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // SAFETY: `UnsafeWorldCell` requires that this must only access metadata.

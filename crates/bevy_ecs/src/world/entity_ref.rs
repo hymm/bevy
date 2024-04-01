@@ -2,13 +2,13 @@ use crate::{
     archetype::{Archetype, ArchetypeId, Archetypes},
     bundle::{Bundle, BundleId, BundleInfo, BundleInserter, DynamicBundle},
     change_detection::MutUntyped,
-    component::{Component, ComponentId, ComponentTicks, Components, StorageType},
+    component::{Component, ComponentId, ComponentInfo, ComponentTicks, Components, StorageType},
     entity::{Entities, Entity, EntityLocation},
     event::Event,
     observer::{Observer, Observers},
     query::Access,
     removal_detection::RemovedComponentEvents,
-    storage::Storages,
+    storage::{ComponentSparseSet, SparseSet, Storages, Table, TableId},
     system::IntoObserverSystem,
     world::{DeferredWorld, Mut, World},
 };
@@ -16,7 +16,7 @@ use bevy_ptr::{OwningPtr, Ptr};
 use std::{any::TypeId, marker::PhantomData};
 use thiserror::Error;
 
-use super::{unsafe_world_cell::UnsafeEntityCell, Ref, ON_REMOVE, ON_REPLACE};
+use super::{unsafe_world_cell::UnsafeEntityCell, Ref, WorldId, ON_REMOVE, ON_REPLACE};
 
 /// A read-only reference to a particular [`Entity`] and all of its components.
 ///
@@ -977,6 +977,13 @@ impl<'w> EntityWorldMut<'w> {
         Some(result)
     }
 
+    #[track_caller]
+    pub unsafe fn take_by_ids<'a, I: Iterator<Item = OwningPtr<'a>>>(
+        &mut self,
+        component_ids: &[ComponentId],
+    ) -> impl Iterator<Item = OwningPtr<'a>> {
+    }
+
     /// # Safety
     ///
     /// `new_archetype_id` must have the same or a subset of the components
@@ -1322,6 +1329,110 @@ impl<'w> EntityWorldMut<'w> {
                 .set_entity_table_row(moved_location.archetype_row, table_row);
         }
         world.flush();
+    }
+
+    // TODO: figure out how to share code with despawn
+    pub fn take_entity(self) -> Option<TakenEntity> {
+        let world = self.world;
+        world.flush_entities();
+        let archetype = &world.archetypes[self.location.archetype_id];
+
+        // SAFETY: Archetype cannot be mutably aliased by DeferredWorld
+        let (archetype, mut deferred_world) = unsafe {
+            let archetype: *const Archetype = archetype;
+            let world = world.as_unsafe_world_cell();
+            (&*archetype, world.into_deferred())
+        };
+
+        // SAFETY: All components in the archetype exist in world
+        unsafe {
+            deferred_world.trigger_on_replace(archetype, self.entity, archetype.components());
+            if archetype.has_replace_observer() {
+                deferred_world.trigger_observers(
+                    ON_REPLACE,
+                    self.entity,
+                    &archetype.components().collect::<Vec<ComponentId>>(),
+                );
+            }
+            deferred_world.trigger_on_remove(archetype, self.entity, archetype.components());
+            if archetype.has_remove_observer() {
+                deferred_world.trigger_observers(
+                    ON_REMOVE,
+                    self.entity,
+                    &archetype.components().collect::<Vec<ComponentId>>(),
+                );
+            }
+        }
+
+        for component_id in archetype.components() {
+            world.removed_components.send(component_id, self.entity);
+        }
+
+        let location = world
+            .entities
+            .free(self.entity)
+            .expect("entity should exist at this point.");
+        let table_row;
+        let moved_entity;
+
+        {
+            let archetype = &mut world.archetypes[self.location.archetype_id];
+            let remove_result = archetype.swap_remove(location.archetype_row);
+            if let Some(swapped_entity) = remove_result.swapped_entity {
+                let swapped_location = world.entities.get(swapped_entity).unwrap();
+                // SAFETY: swapped_entity is valid and the swapped entity's components are
+                // moved to the new location immediately after.
+                unsafe {
+                    world.entities.set(
+                        swapped_entity.index(),
+                        EntityLocation {
+                            archetype_id: swapped_location.archetype_id,
+                            archetype_row: location.archetype_row,
+                            table_id: swapped_location.table_id,
+                            table_row: swapped_location.table_row,
+                        },
+                    );
+                }
+            }
+            table_row = remove_result.table_row;
+
+            for component_id in archetype.sparse_set_components() {
+                let sparse_set = world.storages.sparse_sets.get_mut(component_id).unwrap();
+                sparse_set.remove(self.entity);
+            }
+            // SAFETY: table rows stored in archetypes always exist
+            moved_entity = unsafe {
+                world.storages.tables[archetype.table_id()].swap_remove_unchecked(table_row)
+            };
+        };
+
+        if let Some(moved_entity) = moved_entity {
+            let moved_location = world.entities.get(moved_entity).unwrap();
+            // SAFETY: `moved_entity` is valid and the provided `EntityLocation` accurately reflects
+            //         the current location of the entity and its component data.
+            unsafe {
+                world.entities.set(
+                    moved_entity.index(),
+                    EntityLocation {
+                        archetype_id: moved_location.archetype_id,
+                        archetype_row: moved_location.archetype_row,
+                        table_id: moved_location.table_id,
+                        table_row,
+                    },
+                );
+            }
+            world.archetypes[moved_location.archetype_id]
+                .set_entity_table_row(moved_location.archetype_row, table_row);
+        }
+        world.flush_commands();
+
+        Some(TakenEntity {
+            world_id: world.id(),
+            archetype: archetype.id(),
+            table_id: archetype.table_id(),
+            sparse_commponents: todo!(),
+            table: todo!(),
+        })
     }
 
     /// Ensures any commands triggered by the actions of Self are applied, equivalent to [`World::flush`]
@@ -2525,6 +2636,14 @@ pub(crate) unsafe fn take_component<'a>(
             .remove_and_forget(entity)
             .unwrap(),
     }
+}
+
+struct TakenEntity {
+    world_id: WorldId,
+    archetype: ArchetypeId,
+    table_id: TableId,
+    table: Table,
+    sparse_commponents: SparseSet<ComponentId, ComponentSparseSet>,
 }
 
 #[cfg(test)]
