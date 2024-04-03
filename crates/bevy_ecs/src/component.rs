@@ -153,9 +153,16 @@ use std::{
 pub trait Component: Send + Sync + 'static {
     /// A constant indicating the storage type used for this component.
     const STORAGE_TYPE: StorageType;
+    /// Return type for &Component Queries
+    type Ref<'a>;
+    /// Return type for &mut Self Queries
+    type Mut<'b>;
 
     /// Called when registering this component, allowing mutable access to it's [`ComponentHooks`].
     fn register_component_hooks(_hooks: &mut ComponentHooks) {}
+
+    /// Convert the reference to Self to `Self::Ref`
+    fn get_ref<'a>(&self, component: &'a Self) -> Self::Ref<'a>;
 }
 
 /// The storage used for a specific component type.

@@ -22,6 +22,8 @@ struct MyComponent(KeyCode);
 
 impl Component for MyComponent {
     const STORAGE_TYPE: StorageType = StorageType::Table;
+    type Ref<'a> = &'a Self;
+    type Mut<'a> = &'a mut Self;
 
     /// Hooks can also be registered during component initialisation by
     /// implementing `register_component_hooks`

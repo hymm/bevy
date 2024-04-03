@@ -885,11 +885,12 @@ impl<T> Copy for ReadFetch<'_, T> {}
 /// `update_component_access` adds a `With` filter for a component.
 /// This is sound because `matches_component_set` returns whether the set contains that component.
 unsafe impl<T: Component> WorldQuery for &T {
-    type Item<'w> = &'w T;
+    type Item<'w> = T::Ref<'w>;
     type Fetch<'w> = ReadFetch<'w, T>;
     type State = ComponentId;
 
-    fn shrink<'wlong: 'wshort, 'wshort>(item: &'wlong T) -> &'wshort T {
+    fn shrink<'wlong: 'wshort, 'wshort>(item: <T as Component>::Ref<'wlong>) -> <T as Component>::Ref<'wshort> {
+        // TODO: try to use something like <https://docs.rs/higher-kinded-types/0.2.0-rc1/higher_kinded_types/extra_arities/trait.CovariantForLt.html> to fix this error
         item
     }
 
@@ -967,14 +968,15 @@ unsafe impl<T: Component> WorldQuery for &T {
                 let table = unsafe { fetch.table_components.debug_checked_unwrap() };
                 // SAFETY: Caller ensures `table_row` is in range.
                 let item = unsafe { table.get(table_row.as_usize()) };
-                item.deref()
+
+                <T as Component>::get_ref(item.deref(), item.deref())
             }
             StorageType::SparseSet => {
                 // SAFETY: STORAGE_TYPE = SparseSet
                 let sparse_set = unsafe { fetch.sparse_set.debug_checked_unwrap() };
                 // SAFETY: Caller ensures `entity` is in range.
                 let item = unsafe { sparse_set.get(entity).debug_checked_unwrap() };
-                item.deref()
+                <T as Component>::get_ref(item.deref(), item.deref())
             }
         }
     }

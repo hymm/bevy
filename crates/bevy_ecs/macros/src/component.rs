@@ -61,6 +61,13 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         impl #impl_generics #bevy_ecs_path::component::Component for #struct_name #type_generics #where_clause {
             const STORAGE_TYPE: #bevy_ecs_path::component::StorageType = #storage;
+            type Ref<'a> = &'a Self;
+            type Mut<'a> = &'a mut Self;
+
+            #[inline]
+            fn get_ref<'a>(&self, component: &'a Self) -> &'a Self {
+                component
+            }
         }
     })
 }
