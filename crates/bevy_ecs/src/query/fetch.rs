@@ -1,7 +1,7 @@
 use crate::{
     archetype::{Archetype, Archetypes},
     change_detection::{Ticks, TicksMut},
-    component::{Component, ComponentId, StorageType, Tick},
+    component::{Component, ComponentId, Shrinkable, StorageType, Tick},
     entity::{Entities, Entity, EntityLocation},
     query::{Access, DebugCheckedUnwrap, FilteredAccess, WorldQuery},
     storage::{ComponentSparseSet, Table, TableRow},
@@ -889,9 +889,10 @@ unsafe impl<T: Component> WorldQuery for &T {
     type Fetch<'w> = ReadFetch<'w, T>;
     type State = ComponentId;
 
-    fn shrink<'wlong: 'wshort, 'wshort>(item: <T as Component>::Ref<'wlong>) -> <T as Component>::Ref<'wshort> {
-        // TODO: try to use something like <https://docs.rs/higher-kinded-types/0.2.0-rc1/higher_kinded_types/extra_arities/trait.CovariantForLt.html> to fix this error
-        item
+    fn shrink<'wlong: 'wshort, 'wshort>(
+        item: <T as Component>::Ref<'wlong>,
+    ) -> <T as Component>::Ref<'wshort> {
+        <<T as Component>::Ref<'_> as Shrinkable>::shrink(item)
     }
 
     #[inline]

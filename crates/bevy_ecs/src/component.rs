@@ -154,7 +154,7 @@ pub trait Component: Send + Sync + 'static {
     /// A constant indicating the storage type used for this component.
     const STORAGE_TYPE: StorageType;
     /// Return type for &Component Queries
-    type Ref<'a>;
+    type Ref<'a>: Shrinkable;
     /// Return type for &mut Self Queries
     type Mut<'b>;
 
@@ -163,6 +163,21 @@ pub trait Component: Send + Sync + 'static {
 
     /// Convert the reference to Self to `Self::Ref`
     fn get_ref<'a>(&self, component: &'a Self) -> Self::Ref<'a>;
+}
+
+// TODO: This is a workaround for variance blah blah blah.
+pub(crate) trait Shrinkable {
+    type Item<'a>;
+
+    fn shrink<'long: 'short, 'short>(item: Self::Item<'long>) -> Self::Item<'short>;
+}
+
+impl<T: 'static> Shrinkable for &T {
+    type Item<'a> = &'a T;
+
+    fn shrink<'long: 'short, 'short>(item: Self::Item<'long>) -> Self::Item<'short> {
+        item
+    }
 }
 
 /// The storage used for a specific component type.
