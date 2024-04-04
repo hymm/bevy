@@ -274,7 +274,9 @@ pub fn calculate_bounds(
 /// This system is used in system sets [`VisibilitySystems::UpdateProjectionFrusta`],
 /// [`VisibilitySystems::UpdatePerspectiveFrusta`], and
 /// [`VisibilitySystems::UpdateOrthographicFrusta`].
-pub fn update_frusta<T: Component + CameraProjection + Send + Sync + 'static>(
+pub fn update_frusta<
+    T: for<'a> Component<Ref<'a> = &'a T> + CameraProjection + Send + Sync + 'static,
+>(
     mut views: Query<
         (&GlobalTransform, &T, &mut Frustum),
         Or<(Changed<GlobalTransform>, Changed<T>)>,

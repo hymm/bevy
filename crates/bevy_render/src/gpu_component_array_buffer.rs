@@ -15,7 +15,9 @@ use std::marker::PhantomData;
 /// by storing them in a [`GpuArrayBuffer`].
 pub struct GpuComponentArrayBufferPlugin<C: Component + GpuArrayBufferable>(PhantomData<C>);
 
-impl<C: Component + GpuArrayBufferable> Plugin for GpuComponentArrayBufferPlugin<C> {
+impl<C: for<'a> Component<Ref<'a> = &'a C> + GpuArrayBufferable> Plugin
+    for GpuComponentArrayBufferPlugin<C>
+{
     fn build(&self, app: &mut App) {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_systems(
@@ -40,7 +42,9 @@ impl<C: Component + GpuArrayBufferable> Default for GpuComponentArrayBufferPlugi
     }
 }
 
-fn prepare_gpu_component_array_buffers<C: Component + GpuArrayBufferable>(
+fn prepare_gpu_component_array_buffers<
+    C: for<'a> Component<Ref<'a> = &'a C> + GpuArrayBufferable,
+>(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,

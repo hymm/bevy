@@ -78,7 +78,9 @@ impl<C> Default for UniformComponentPlugin<C> {
     }
 }
 
-impl<C: Component + ShaderType + WriteInto + Clone> Plugin for UniformComponentPlugin<C> {
+impl<C: for<'a> Component<Ref<'a> = &'a C> + ShaderType + WriteInto + Clone> Plugin
+    for UniformComponentPlugin<C>
+{
     fn build(&self, app: &mut App) {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -123,7 +125,7 @@ impl<C: Component + ShaderType> Default for ComponentUniforms<C> {
 
 /// This system prepares all components of the corresponding component type.
 /// They are transformed into uniforms and stored in the [`ComponentUniforms`] resource.
-fn prepare_uniform_components<C: Component>(
+fn prepare_uniform_components<C: for<'a> Component<Ref<'a> = &'a C>>(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
