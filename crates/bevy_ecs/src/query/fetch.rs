@@ -1,7 +1,7 @@
 use crate::{
     archetype::{Archetype, Archetypes},
     change_detection::{Ticks, TicksMut},
-    component::{Component, ComponentId, Shrinkable, StorageType, Tick},
+    component::{Component, ComponentId, StorageType, Tick},
     entity::{Entities, Entity, EntityLocation},
     query::{Access, DebugCheckedUnwrap, FilteredAccess, WorldQuery},
     storage::{ComponentSparseSet, Table, TableRow},
@@ -892,7 +892,7 @@ unsafe impl<T: Component> WorldQuery for &T {
     fn shrink<'wlong: 'wshort, 'wshort>(
         item: <T as Component>::Ref<'wlong>,
     ) -> <T as Component>::Ref<'wshort> {
-        <<T as Component>::Ref<'_> as Shrinkable>::shrink(item)
+        <T as Component>::shrink_ref(item)
     }
 
     #[inline]

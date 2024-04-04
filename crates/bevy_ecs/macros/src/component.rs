@@ -68,6 +68,10 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
             fn get_ref<'a>(&self, component: &'a Self) -> &'a Self {
                 component
             }
+
+            fn shrink_ref<'long: 'short, 'short>(item: Self::Ref<'long>) -> Self::Ref<'short> {
+                item
+            }
         }
     })
 }
