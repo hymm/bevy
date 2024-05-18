@@ -24,10 +24,12 @@ mod blob_vec;
 mod resource;
 mod sparse_set;
 mod table;
+mod tls;
 
 pub use resource::*;
 pub use sparse_set::*;
 pub use table::*;
+pub use tls::*;
 
 /// The raw data stores of a [`World`](crate::world::World)
 #[derive(Default)]

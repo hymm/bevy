@@ -527,6 +527,12 @@ pub fn derive_resource(input: TokenStream) -> TokenStream {
     component::derive_resource(input)
 }
 
+#[proc_macro_derive(ThreadLocalResource)]
+/// Derive macro generating an impl of the trait `ThreadLocalResource`.
+pub fn derive_thread_local_resource(input: TokenStream) -> TokenStream {
+    component::derive_thread_local_resource(input)
+}
+
 #[proc_macro_derive(Component, attributes(component))]
 pub fn derive_component(input: TokenStream) -> TokenStream {
     component::derive_component(input)
