@@ -613,6 +613,88 @@ impl<T: Event> ApplicationHandler<T> for WinitAppRunnerState<T> {
     }
 }
 
+fn check_if_app_should_update(
+    runner_state: &mut self,
+    sub_apps: &mut SubApps,
+    control_flow: &mut ControlFlow,
+) {
+    if !runner_state.active.should_run() {
+        return;
+    }
+
+    let (config, windows) = focused_windows_state.get(sub_apps.main.world());
+    let focused = windows.iter().any(|window| window.focused);
+    let mut should_update = match config.update_mode(focused) {
+        UpdateMode::Continuous => {
+            runner_state.redraw_requested
+                || runner_state.window_event_received
+                || runner_state.device_event_received
+        }
+        UpdateMode::Reactive { .. } => {
+            runner_state.wait_elapsed
+                || runner_state.redraw_requested
+                || runner_state.window_event_received
+                || runner_state.device_event_received
+        }
+        UpdateMode::ReactiveLowPower { .. } => {
+            runner_state.wait_elapsed
+                || runner_state.redraw_requested
+                || runner_state.window_event_received
+        }
+    };
+
+    // force a few updates to ensure the app is properly initialized
+    if runner_state.startup_forced_updates > 0 {
+        runner_state.startup_forced_updates -= 1;
+        should_update = true;
+    }
+}
+
+fn check_when_app_should_update_next(
+    runner_state: &mut WinitAppRunnerState,
+    sub_apps: &mut SubApps,
+    control_flow: &mut ControlFlow,
+) {
+    // decide when to run the next update
+    let (config, windows) = focused_windows_state.get(sub_apps.main.world());
+    let focused = windows.iter().any(|window| window.focused);
+    match config.update_mode(focused) {
+        UpdateMode::Continuous => *control_flow = ControlFlow::Poll,
+        UpdateMode::Reactive { wait, .. } | UpdateMode::ReactiveLowPower { wait } => {
+            if let Some(next) = runner_state.last_update.checked_add(wait) {
+                runner_state.scheduled_update = Some(next);
+                *control_flow = ControlFlow::WaitUntil(next);
+            } else {
+                // TODO: warn user
+                runner_state.scheduled_update = None;
+                *control_flow = ControlFlow::Wait;
+            }
+        }
+    }
+
+    if let Some(redraw_events) = sub_apps
+        .main
+        .world()
+        .get_resource::<Events<RequestRedraw>>()
+    {
+        if redraw_event_reader.read(redraw_events).last().is_some() {
+            runner_state.redraw_requested = true;
+            *control_flow = ControlFlow::Poll;
+        }
+    }
+
+    if runner_state.active == ActiveState::WillSuspend {
+        runner_state.active = ActiveState::Suspended;
+        *control_flow = ControlFlow::Wait;
+    }
+
+    if let Some(exit_events) = sub_apps.main.world().get_resource::<Events<AppExit>>() {
+        if app_exit_event_reader.read(exit_events).last().is_some() {
+            *control_flow = ControlFlow::Exit;
+        }
+    }
+}
+
 impl<T: Event> WinitAppRunnerState<T> {
     fn should_update(&self, update_mode: UpdateMode) -> bool {
         let handle_event = match update_mode {
