@@ -1,10 +1,10 @@
 use crate::{
     archetype::Archetype,
-    component::{ComponentId, ComponentInitializer, Tick},
+    component::{ComponentId, Tick},
     entity::Entity,
     query::FilteredAccess,
     storage::{Table, TableRow},
-    world::unsafe_world_cell::UnsafeWorldCell,
+    world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 use bevy_utils::all_tuples;
 
@@ -127,7 +127,7 @@ pub unsafe trait WorldQuery {
     fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>);
 
     /// Creates and initializes a [`State`](WorldQuery::State) for this [`WorldQuery`] type.
-    fn init_state(initializer: &mut ComponentInitializer) -> Self::State;
+    fn init_state(world: &mut World) -> Self::State;
 
     /// Attempts to initialize a [`State`](WorldQuery::State) for this [`WorldQuery`] type using read-only
     /// access to [`Components`].
@@ -213,8 +213,8 @@ macro_rules! impl_tuple_world_query {
                 $($name::update_component_access($name, _access);)*
             }
             #[allow(unused_variables)]
-            fn init_state(initializer: &mut ComponentInitializer) -> Self::State {
-                ($($name::init_state(initializer),)*)
+            fn init_state(world: &mut World) -> Self::State {
+                ($($name::init_state(world),)*)
             }
             #[allow(unused_variables)]
             fn get_state(world_cell: UnsafeWorldCell<'_>) -> Option<Self::State> {
