@@ -170,9 +170,9 @@ pub(crate) fn world_query_impl(
                 }
             }
 
-            fn get_state(components: &#path::component::Components) -> Option<#state_struct_name #user_ty_generics> {
+            fn get_state(world_cell: #path::world::unsafe_world_cell::UnsafeWorldCell) -> Option<#state_struct_name #user_ty_generics> {
                 Some(#state_struct_name {
-                    #(#named_field_idents: <#field_types>::get_state(components)?,)*
+                    #(#named_field_idents: <#field_types>::get_state(world_cell)?,)*
                 })
             }
 
