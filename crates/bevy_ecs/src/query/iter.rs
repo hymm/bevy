@@ -301,9 +301,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -398,9 +396,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -500,9 +496,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -568,9 +562,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -699,9 +691,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -771,9 +761,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
         let world = self.world;
 
-        let query_lens_state = self
-            .query_state
-            .transmute_filtered::<(L, Entity), F>(world.components());
+        let query_lens_state = self.query_state.transmute_filtered::<(L, Entity), F>(world);
 
         // SAFETY:
         // `self.world` has permission to access the required components.
