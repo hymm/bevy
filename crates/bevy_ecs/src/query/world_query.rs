@@ -1,6 +1,6 @@
 use crate::{
     archetype::Archetype,
-    component::{ComponentId, Components, Tick},
+    component::{ComponentId, Tick},
     entity::Entity,
     query::FilteredAccess,
     storage::{Table, TableRow},
@@ -132,6 +132,9 @@ pub unsafe trait WorldQuery {
     /// Attempts to initialize a [`State`](WorldQuery::State) for this [`WorldQuery`] type using read-only
     /// access to [`Components`].
     fn get_state(components: UnsafeWorldCell) -> Option<Self::State>;
+
+    /// Called in [`QueryState::new_uninitialized`] to register resources called in get_state
+    fn extra_access(_state: &Self::State, _access: &mut FilteredAccess<ComponentId>) {}
 
     /// Returns `true` if this query matches a set of components. Otherwise, returns `false`.
     ///
