@@ -763,7 +763,8 @@ fn sd_box_uniform_border(point: vec2<f32>, half_size: vec2<f32>, border: f32) ->
 // get alpha for antialiasing for sdf
 fn antialias(distance: f32) -> f32 {
     // Using the fwidth(distance) was causing artifacts, so just use the distance.
-    return clamp(0.0, 1.0, 0.5 - distance);
+    // This antialiases between the distance values of 0.25 and -0.25
+    return clamp(0.0, 1.0, 0.5 - 2.0 * distance);
 }
 
 fn draw(in: VertexOutput, texture_color: vec4<f32>) -> vec4<f32> {
@@ -783,11 +784,18 @@ fn sd_rounded_box_uniform_border(point: vec2<f32>, half_size: vec2<f32>, corner_
     return max(exterior, -interior);
 }
 
+<<<<<<< HEAD
 fn sd_rounded_box_interior(point: vec2<f32>, half_size: vec2<f32>, corner_radii: vec4<f32>, border: f32) -> f32 {
     let exterior = sd_rounded_box(point, half_size, corner_radii);
     let interior = exterior + border;
     return interior;    
 }
+=======
+    // Signed distance from the border's internal edge (the signed distance is negative if the point 
+    // is inside the rect but not on the border).
+    // If the border size is set to zero, this is the same as the external distance.
+    let internal_distance = sd_inset_rounded_box(in.point, in.size, in.radius, in.border);
+>>>>>>> Gingeh/main
 
 fn compute_signed_distance_with_uniform_border(point: vec2<f32>, half_size: vec2<f32>, flags: u32, border: f32, radius: vec4<f32>) -> f32 {
     var d: f32;

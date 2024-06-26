@@ -253,11 +253,8 @@ fn spawn_button(
                 border,
                 ..default()
             },
-<<<<<<< HEAD
-            background_color: background_color.clone(),
-=======
+            background_color: background_color.into(),
             image: UiImage::default().with_color(background_color),
->>>>>>> origin/main
             border_color,
             ..default()
         },

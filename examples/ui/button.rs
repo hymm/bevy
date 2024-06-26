@@ -94,8 +94,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 =======
                     border_color: BorderColor(Color::BLACK),
                     border_radius: BorderRadius::MAX,
+                    background_color: NORMAL_BUTTON.into(),
                     image: UiImage::default().with_color(NORMAL_BUTTON),
->>>>>>> origin/main
                     ..default()
                 })
                 .with_children(|parent| {

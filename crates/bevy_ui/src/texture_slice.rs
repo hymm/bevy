@@ -87,6 +87,16 @@ impl ComputedTextureSlices {
 /// will be computed according to the `image_handle` dimensions or the sprite rect.
 ///
 /// Returns `None` if the image asset is not loaded
+///
+/// # Arguments
+///
+/// * `draw_area` - The size of the drawing area the slices will have to fit into
+/// * `scale_mode` - The image scaling component
+/// * `image_handle` - The texture to slice or tile
+/// * `images` - The image assets, use to retrieve the image dimensions
+/// * `atlas` - Optional texture atlas, if set the slicing will happen on the matching sub section
+///     of the texture
+/// * `atlas_layouts` - The atlas layout assets, used to retrieve the texture atlas section rect
 #[must_use]
 fn compute_texture_slices(
     draw_area: Vec2,
