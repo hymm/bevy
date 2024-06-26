@@ -31,6 +31,7 @@ pub use measurement::*;
 pub use render::*;
 pub use ui_material::*;
 pub use ui_node::*;
+use ui_surface::UiSurface;
 use widget::UiImageSize;
 
 #[doc(hidden)]

@@ -1,10 +1,10 @@
 use std::fmt::Write;
 
-use taffy::{NodeId, TraversePartialTree};
 use bevy_ecs::prelude::Entity;
 use bevy_utils::HashMap;
+use taffy::{NodeId, TraversePartialTree};
 
-use crate::UiSurface;
+use crate::ui_surface::UiSurface;
 
 /// Prints a debug representation of the computed layout of the UI layout tree for each window.
 pub fn print_ui_layout_tree(ui_surface: &UiSurface) {
