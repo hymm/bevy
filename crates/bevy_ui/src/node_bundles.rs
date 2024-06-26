@@ -21,7 +21,7 @@ use bevy_transform::prelude::{GlobalTransform, Transform};
 /// Contains the [`Node`] component and other components required to make a container.
 ///
 /// See [`node_bundles`](crate::node_bundles) for more specialized bundles like [`TextBundle`].
-#[derive(Bundle, Clone, Debug, Default)]
+#[derive(Bundle, Clone, Debug)]
 pub struct NodeBundle {
     /// Describes the logical size of the node
     pub node: Node,
@@ -94,8 +94,6 @@ pub struct ImageBundle {
     pub background_color: BackgroundColor,
     /// The image of the node
     pub image: UiImage,
-    /// The color of the background that will fill the containing node.
-    pub background_color: BackgroundColor,
     /// The size of the image in pixels
     ///
     /// This component is set automatically
@@ -171,7 +169,7 @@ pub struct AtlasImageBundle {
 ///
 /// The positioning of this node is controlled by the UI layout system. If you need manual control,
 /// use [`Text2dBundle`](bevy_text::Text2dBundle).
-#[derive(Bundle, Debug, Default)]
+#[derive(Bundle, Debug)]
 pub struct TextBundle {
     /// Describes the logical size of the node
     pub node: Node,
@@ -227,7 +225,9 @@ impl Default for TextBundle {
             view_visibility: Default::default(),
             z_index: Default::default(),
             // Transparent background
-            background_color: BackgroundColor(UiColor::Color(Color::linear_rgba(0.0, 0.0, 0.0, 0.0))),
+            background_color: BackgroundColor(UiColor::Color(Color::linear_rgba(
+                0.0, 0.0, 0.0, 0.0,
+            ))),
         }
     }
 }
@@ -317,8 +317,6 @@ pub struct ButtonBundle {
     pub border_color: BorderColor,
     /// The image of the node
     pub image: UiImage,
-    /// The background color that will fill the containing node
-    pub background_color: BackgroundColor,
     /// The transform of the node
     ///
     /// This component is automatically managed by the UI layout system.
@@ -349,7 +347,6 @@ impl Default for ButtonBundle {
             interaction: Default::default(),
             background_color: Default::default(),
             image: Default::default(),
-            background_color: Default::default(),
             transform: Default::default(),
             global_transform: Default::default(),
             visibility: Default::default(),

@@ -118,6 +118,7 @@ impl<T: Event> WinitAppRunnerState<T> {
             winit_events: Vec::new(),
             _marker: PhantomData,
             event_writer_system_state,
+            #[cfg(target_os = "macos")]
             keyboard_modifiers: Modifiers::default(),
         }
     }

@@ -30,10 +30,10 @@ use crate::{DefaultUiCamera, Outline, TargetCamera};
 
 use bevy_app::prelude::*;
 use bevy_asset::{load_internal_asset, AssetEvent, AssetId, Assets, Handle};
+use bevy_color::{Alpha, Color};
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::prelude::*;
 use bevy_math::{FloatOrd, Mat4, Rect, URect, UVec4, Vec2, Vec3};
-use bevy_color::{Alpha, Color};
 use bevy_render::{
     camera::Camera,
     render_asset::RenderAssets,
@@ -96,6 +96,7 @@ pub fn build_ui_render(app: &mut App) {
         .init_resource::<UiImageBindGroups>()
         .init_resource::<UiMeta>()
         .init_resource::<ExtractedUiNodes>()
+        .init_resource::<ViewSortedRenderPhases<TransparentUi>>()
         .allow_ambiguous_resource::<ExtractedUiNodes>()
         .init_resource::<DrawFunctions<TransparentUi>>()
         .add_render_command::<TransparentUi, DrawUi>()

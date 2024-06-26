@@ -1,23 +1,23 @@
 use crate::{UiRect, Val};
 use bevy_asset::Handle;
 
+use bevy_color::{Alpha, Color, LinearRgba, Srgba};
 use bevy_ecs::{prelude::*, system::SystemParam};
+use bevy_math::FloatOrd;
 use bevy_math::{vec2, Rect, Vec2};
 use bevy_reflect::prelude::*;
 use bevy_render::{
     camera::{Camera, RenderTarget},
     texture::{Image, TRANSPARENT_IMAGE_HANDLE},
 };
-use bevy_color::{Alpha, Color, LinearRgba, Srgba};
 use bevy_transform::prelude::GlobalTransform;
 use bevy_utils::warn_once;
 use bevy_window::{PrimaryWindow, WindowRef};
+use smallvec::SmallVec;
 use std::{
     f32::consts::{FRAC_PI_2, PI},
     num::{NonZeroI16, NonZeroU16},
 };
-use smallvec::SmallVec;
-use bevy_math::FloatOrd;
 use thiserror::Error;
 
 /// Base component for a UI node, which also provides the computed size of the node.
@@ -87,7 +87,10 @@ impl Node {
     /// Returns the logical pixel coordinates of the UI node, based on its [`GlobalTransform`].
     #[inline]
     pub fn logical_rect(&self, transform: &GlobalTransform) -> Rect {
-        Rect::from_center_size(transform.translation().truncate(), self.size().max(Vec2::ZERO))
+        Rect::from_center_size(
+            transform.translation().truncate(),
+            self.size().max(Vec2::ZERO),
+        )
     }
 
     /// Returns the logical pixel coordinates of the UI node.
@@ -2156,9 +2159,6 @@ impl Default for UiImage {
     /// or use [`Handle<Image>`]'s default 1x1 solid white texture (as is done in [`UiImage::solid_color`]).
     fn default() -> Self {
         UiImage {
-            // This should be white because the tint is multiplied with the image,
-            // so if you set an actual image with default tint you'd want its original colors
-            color: Color::WHITE,
             // This texture needs to be transparent by default, to avoid covering the background color
             texture: TRANSPARENT_IMAGE_HANDLE,
             flip_x: false,
@@ -2172,7 +2172,6 @@ impl UiImage {
     pub fn new(texture: Handle<Image>) -> Self {
         Self {
             texture,
-            color: Color::WHITE,
             ..Default::default()
         }
     }
@@ -2474,7 +2473,6 @@ impl From<(Srgba, Val)> for ColorStop {
         (Color::from(color), val).into()
     }
 }
-
 
 pub fn resolve_color_stops(
     stops: &[ColorStop],
@@ -2840,9 +2838,9 @@ pub struct BoxShadow {
 
 #[cfg(test)]
 mod tests {
+    use bevy_color::Color;
     use bevy_color::LinearRgba;
     use bevy_math::Vec2;
-    use bevy_color::Color;
 
     use crate::resolve_color_stops;
     use crate::ColorStop;
