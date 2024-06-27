@@ -615,6 +615,15 @@ pub struct ScheduleGraph {
     /// Dependency edges that will **not** automatically insert an instance of `apply_deferred` on the edge.
     no_sync_edges: BTreeSet<(NodeId, NodeId)>,
     auto_sync_node_ids: HashMap<u32, NodeId>,
+    built: Option<ScheduleGraphBuilt>,
+}
+
+/// data produced when building the schedule graph
+#[derive(Default)]
+pub struct ScheduleGraphBuilt {
+    hierarchy: Dag,
+    dependency: Dag,
+    set_systems: HashMap<NodeId, Vec<NodeId>>,
 }
 
 impl ScheduleGraph {
@@ -637,6 +646,7 @@ impl ScheduleGraph {
             settings: default(),
             no_sync_edges: BTreeSet::new(),
             auto_sync_node_ids: HashMap::new(),
+            built: None,
         }
     }
 
@@ -701,6 +711,14 @@ impl ScheduleGraph {
             let conditions = self.system_set_conditions[node_id.index()].as_slice();
             (node_id, set, conditions)
         })
+    }
+
+    /// Returns iterator over all [`SystemId`]'s in a [SystemSet]
+    /// Returns `None` if the label is not found or the schedule is not built
+    pub fn systems_in_set(&self, label: InternedSystemSet) -> Option<Vec<NodeId>> {
+        let system_set_id = self.system_set_ids.get(&label)?;
+        let set_systems = &self.built.as_ref()?.set_systems;
+        set_systems.get(system_set_id).cloned()
     }
 
     /// Returns the [`Dag`] of the hierarchy.
@@ -1074,18 +1092,20 @@ impl ScheduleGraph {
         schedule_label: InternedScheduleLabel,
         ignored_ambiguities: &BTreeSet<ComponentId>,
     ) -> Result<SystemSchedule, ScheduleBuildError> {
+        let mut built = ScheduleGraphBuilt::default();
+
         // check hierarchy for cycles
-        self.hierarchy.topsort =
+        built.hierarchy.topsort =
             self.topsort_graph(&self.hierarchy.graph, ReportCycles::Hierarchy)?;
 
         let hier_results = check_graph(&self.hierarchy.graph, &self.hierarchy.topsort);
         self.optionally_check_hierarchy_conflicts(&hier_results.transitive_edges, schedule_label)?;
 
         // remove redundant edges
-        self.hierarchy.graph = hier_results.transitive_reduction;
+        built.hierarchy.graph = hier_results.transitive_reduction;
 
         // check dependencies for cycles
-        self.dependency.topsort =
+        built.dependency.topsort =
             self.topsort_graph(&self.dependency.graph, ReportCycles::Dependency)?;
 
         // check for systems or system sets depending on sets they belong to
@@ -1097,6 +1117,8 @@ impl ScheduleGraph {
         let (set_systems, set_system_bitsets) =
             self.map_sets_to_systems(&self.hierarchy.topsort, &self.hierarchy.graph);
         self.check_order_but_intersect(&dep_results.connected, &set_system_bitsets)?;
+
+        self.built.set_systems = set_systems;
 
         // check that there are no edges to system-type sets that have multiple instances
         self.check_system_type_set_ambiguity(&set_systems)?;
