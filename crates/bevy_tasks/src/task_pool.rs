@@ -621,6 +621,26 @@ impl<'scope, 'env, T: Send + 'scope> Scope<'scope, 'env, T> {
         self.spawned.push(task).unwrap();
     }
 
+    /// spawn many tasks onto the scope
+    ///
+    /// this can be faster than spawn
+    pub fn spawn_many<Fut: Future<Output = T> + 'scope + Send>(
+        &self,
+        futures: impl IntoIterator<Item = Fut>,
+    ) {
+        // TODO: should cache this temp vector somewhere or figure out how to push multiple to concurrent queue
+        let mut temp_tasks = vec![];
+        self.executor.spawn_many(
+            futures
+                .into_iter()
+                .map(|f| AssertUnwindSafe(f).catch_unwind()),
+            &mut temp_tasks,
+        );
+        for task in temp_tasks {
+            self.spawned.push(task.fallible()).unwrap();
+        }
+    }
+
     /// Spawns a scoped future onto the thread the scope is run on. The scope *must* outlive
     /// the provided future. The results of the future will be returned as a part of
     /// [`TaskPool::scope`]'s return value.  Users should generally prefer to use
