@@ -1576,45 +1576,6 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             // SAFETY: We only access table data that has been registered in `self.archetype_component_access`.
             let tables = unsafe { &world.storages().tables };
             let archetypes = world.archetypes();
-            let mut batch_queue = ArrayVec::new();
-            let mut queue_entity_count = 0;
-
-            // submit a list of storages which smaller than batch_size as single task
-            let submit_batch_queue = |queue: &mut ArrayVec<StorageId, 128>| {
-                if queue.is_empty() {
-                    return;
-                }
-
-                scope.spawn(self.submit_task(
-                    func.clone(),
-                    init_accum.clone(),
-                    world,
-                    last_run,
-                    this_run,
-                    ParTaskParams::Batch {
-                        queue: core::mem::take(queue),
-                    },
-                ));
-            };
-
-            // submit single storage larger than batch_size
-            let submit_single = |count, storage_id: StorageId| {
-                for offset in (0..count).step_by(batch_size) {
-                    scope.spawn(self.submit_task(
-                        func.clone(),
-                        init_accum.clone(),
-                        world,
-                        last_run,
-                        this_run,
-                        ParTaskParams::Single {
-                            batch_size,
-                            count,
-                            offset,
-                            storage_id,
-                        },
-                    ));
-                }
-            };
 
             let storage_entity_count = |storage_id: StorageId| -> usize {
                 if self.is_dense {
@@ -1624,85 +1585,71 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                 }
             };
 
-            for storage_id in &self.matched_storage_ids {
-                let count = storage_entity_count(*storage_id);
+            scope.spawn_many(std::iter::from_coroutine(
+                #[coroutine]
+                || {
+                    let mut batch_queue = ArrayVec::new();
+                    let mut queue_entity_count = 0;
 
-                // skip empty storage
-                if count == 0 {
-                    continue;
-                }
-                // immediately submit large storage
-                if count >= batch_size {
-                    submit_single(count, *storage_id);
-                    continue;
-                }
-                // merge small storage
-                batch_queue.push(*storage_id);
-                queue_entity_count += count;
+                    for storage_id in &self.matched_storage_ids {
+                        let count = storage_entity_count(*storage_id);
 
-                // submit batch_queue
-                if queue_entity_count >= batch_size || batch_queue.is_full() {
-                    submit_batch_queue(&mut batch_queue);
-                    queue_entity_count = 0;
-                }
-            }
-            submit_batch_queue(&mut batch_queue);
+                        // skip empty storage
+                        if count == 0 {
+                            continue;
+                        }
+                        // immediately submit large storage
+                        if count >= batch_size {
+                            for offset in (0..count).step_by(batch_size) {
+                                yield self.submit_task(
+                                    func.clone(),
+                                    init_accum.clone(),
+                                    world,
+                                    last_run,
+                                    this_run,
+                                    ParTaskParams::Single {
+                                        batch_size,
+                                        count,
+                                        offset,
+                                        storage_id: *storage_id,
+                                    },
+                                );
+                            }
+                            continue;
+                        }
+                        // merge small storage
+                        batch_queue.push(*storage_id);
+                        queue_entity_count += count;
 
-            let mut queue_entity_count = 0;
-            // I'm stuck
-            // * can't make a iterator because it depends on unstable feature
-            // * can't return the types correctly because single vs batched want to return different types
-            scope.spawn_many(self.matched_storage_ids.iter().flat_map(|storage_id| {
-                let count = storage_entity_count(*storage_id);
-
-                // skip empty storage
-                if count == 0 {
-                    return None;
-                }
-
-                // immediately submit large storage
-                if count >= batch_size {
-                    return Some((0..count).step_by(batch_size).map(|offset| {
-                        self.submit_task(
+                        // submit batch_queue
+                        if queue_entity_count >= batch_size || batch_queue.is_full() {
+                            yield self.submit_task(
+                                func.clone(),
+                                init_accum.clone(),
+                                world,
+                                last_run,
+                                this_run,
+                                ParTaskParams::Batch {
+                                    queue: core::mem::take(&mut batch_queue),
+                                },
+                            );
+                            queue_entity_count = 0;
+                        }
+                    }
+                    if !batch_queue.is_empty() {
+                        yield self.submit_task(
                             func.clone(),
                             init_accum.clone(),
                             world,
                             last_run,
                             this_run,
-                            ParTaskParams::Single {
-                                batch_size,
-                                count,
-                                offset,
-                                storage_id: *storage_id,
+                            ParTaskParams::Batch {
+                                queue: core::mem::take(&mut batch_queue),
                             },
-                        )
-                    }));
-                }
-
-                // merge small storage
-                batch_queue.push(*storage_id);
-                queue_entity_count += count;
-
-                // submit batch_queue
-                if queue_entity_count >= batch_size || batch_queue.is_full() {
-                    queue_entity_count = 0;
-                    if batch_queue.is_empty() {
-                        return None;
+                        );
                     }
-                    return Some(self.submit_task(
-                        func.clone(),
-                        init_accum.clone(),
-                        world,
-                        last_run,
-                        this_run,
-                        ParTaskParams::Batch {
-                            queue: core::mem::take(&mut batch_queue),
-                        },
-                    ));
-                }
-
-                None
-            }));
+                },
+            ));
         });
     }
 
