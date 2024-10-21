@@ -10,6 +10,7 @@ use crate::{
     storage::{SparseSetIndex, TableId},
     world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
 };
+use arrayvec::ArrayVec;
 use bevy_utils::tracing::warn;
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::Span;
@@ -1466,6 +1467,80 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         }
     }
 
+    /// method to make type sent to spawn_many the same between tasks
+    async unsafe fn submit_task<'w, T, FN, INIT>(
+        &self,
+        func: FN,
+        init_accum: INIT,
+        world: UnsafeWorldCell<'w>,
+        last_run: Tick,
+        this_run: Tick,
+        params: ParTaskParams,
+    ) where
+        FN: Fn(T, D::Item<'w>) -> T + Send + Sync + Clone,
+        INIT: Fn() -> T + Sync + Send + Clone,
+    {
+        match params {
+            ParTaskParams::Single {
+                batch_size,
+                count,
+                offset,
+                storage_id,
+            } => self.submit_single(
+                func, init_accum, world, last_run, this_run, batch_size, count, offset, storage_id,
+            ),
+            ParTaskParams::Batch { queue } => {
+                self.submit_batch_queue(func, init_accum, world, last_run, this_run, queue)
+            }
+        }
+    }
+
+    unsafe fn submit_single<'w, T, FN, INIT>(
+        &self,
+        mut func: FN,
+        init_accum: INIT,
+        world: UnsafeWorldCell<'w>,
+        last_run: Tick,
+        this_run: Tick,
+        batch_size: usize,
+        count: usize,
+        offset: usize,
+        storage_id: StorageId,
+    ) where
+        FN: Fn(T, D::Item<'w>) -> T + Send + Sync + Clone,
+        INIT: Fn() -> T + Sync + Send + Clone,
+    {
+        let len = batch_size.min(count - offset);
+        let batch = offset..offset + len;
+
+        #[cfg(feature = "trace")]
+        let _span = self.par_iter_span.enter();
+        let accum = init_accum();
+        self.iter_unchecked_manual(world, last_run, this_run)
+            .fold_over_storage_range(accum, &mut func, storage_id, Some(batch));
+    }
+
+    unsafe fn submit_batch_queue<'w, T, FN, INIT>(
+        &self,
+        mut func: FN,
+        init_accum: INIT,
+        world: UnsafeWorldCell<'w>,
+        last_run: Tick,
+        this_run: Tick,
+        queue: ArrayVec<StorageId, 128>,
+    ) where
+        FN: Fn(T, D::Item<'w>) -> T + Send + Sync + Clone,
+        INIT: Fn() -> T + Sync + Send + Clone,
+    {
+        #[cfg(feature = "trace")]
+        let _span = self.par_iter_span.enter();
+        let mut iter = self.iter_unchecked_manual(world, last_run, this_run);
+        let mut accum = init_accum();
+        for storage_id in queue {
+            accum = iter.fold_over_storage_range(accum, &mut func, storage_id, None);
+        }
+    }
+
     /// Runs `func` on each query result in parallel for the given [`World`], where the last change and
     /// the current change tick are given. This is faster than the equivalent
     /// `iter()` method, but cannot be chained like a normal [`Iterator`].
@@ -1497,8 +1572,6 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     {
         // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter,QueryState::par_fold_init_unchecked_manual
-        use arrayvec::ArrayVec;
-
         bevy_tasks::ComputeTaskPool::get().scope(|scope| {
             // SAFETY: We only access table data that has been registered in `self.archetype_component_access`.
             let tables = unsafe { &world.storages().tables };
@@ -1511,34 +1584,35 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                 if queue.is_empty() {
                     return;
                 }
-                let queue = core::mem::take(queue);
-                let mut func = func.clone();
-                let init_accum = init_accum.clone();
-                scope.spawn(async move {
-                    #[cfg(feature = "trace")]
-                    let _span = self.par_iter_span.enter();
-                    let mut iter = self.iter_unchecked_manual(world, last_run, this_run);
-                    let mut accum = init_accum();
-                    for storage_id in queue {
-                        accum = iter.fold_over_storage_range(accum, &mut func, storage_id, None);
-                    }
-                });
+
+                scope.spawn(self.submit_task(
+                    func.clone(),
+                    init_accum.clone(),
+                    world,
+                    last_run,
+                    this_run,
+                    ParTaskParams::Batch {
+                        queue: core::mem::take(queue),
+                    },
+                ));
             };
 
             // submit single storage larger than batch_size
             let submit_single = |count, storage_id: StorageId| {
                 for offset in (0..count).step_by(batch_size) {
-                    let mut func = func.clone();
-                    let init_accum = init_accum.clone();
-                    let len = batch_size.min(count - offset);
-                    let batch = offset..offset + len;
-                    scope.spawn(async move {
-                        #[cfg(feature = "trace")]
-                        let _span = self.par_iter_span.enter();
-                        let accum = init_accum();
-                        self.iter_unchecked_manual(world, last_run, this_run)
-                            .fold_over_storage_range(accum, &mut func, storage_id, Some(batch));
-                    });
+                    scope.spawn(self.submit_task(
+                        func.clone(),
+                        init_accum.clone(),
+                        world,
+                        last_run,
+                        this_run,
+                        ParTaskParams::Single {
+                            batch_size,
+                            count,
+                            offset,
+                            storage_id,
+                        },
+                    ));
                 }
             };
 
@@ -1573,6 +1647,62 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                 }
             }
             submit_batch_queue(&mut batch_queue);
+
+            let mut queue_entity_count = 0;
+            // I'm stuck
+            // * can't make a iterator because it depends on unstable feature
+            // * can't return the types correctly because single vs batched want to return different types
+            scope.spawn_many(self.matched_storage_ids.iter().flat_map(|storage_id| {
+                let count = storage_entity_count(*storage_id);
+
+                // skip empty storage
+                if count == 0 {
+                    return None;
+                }
+
+                // immediately submit large storage
+                if count >= batch_size {
+                    return Some((0..count).step_by(batch_size).map(|offset| {
+                        self.submit_task(
+                            func.clone(),
+                            init_accum.clone(),
+                            world,
+                            last_run,
+                            this_run,
+                            ParTaskParams::Single {
+                                batch_size,
+                                count,
+                                offset,
+                                storage_id: *storage_id,
+                            },
+                        )
+                    }));
+                }
+
+                // merge small storage
+                batch_queue.push(*storage_id);
+                queue_entity_count += count;
+
+                // submit batch_queue
+                if queue_entity_count >= batch_size || batch_queue.is_full() {
+                    queue_entity_count = 0;
+                    if batch_queue.is_empty() {
+                        return None;
+                    }
+                    return Some(self.submit_task(
+                        func.clone(),
+                        init_accum.clone(),
+                        world,
+                        last_run,
+                        this_run,
+                        ParTaskParams::Batch {
+                            queue: core::mem::take(&mut batch_queue),
+                        },
+                    ));
+                }
+
+                None
+            }));
         });
     }
 
@@ -1708,6 +1838,18 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             >())),
         }
     }
+}
+
+enum ParTaskParams {
+    Single {
+        batch_size: usize,
+        count: usize,
+        offset: usize,
+        storage_id: StorageId,
+    },
+    Batch {
+        queue: ArrayVec<StorageId, 128>,
+    },
 }
 
 impl<D: QueryData, F: QueryFilter> From<QueryBuilder<'_, D, F>> for QueryState<D, F> {
