@@ -16,6 +16,8 @@ pub struct ThinColumn {
     pub(super) data: BlobArray,
     pub(super) added_ticks: ThinArrayPtr<UnsafeCell<Tick>>,
     pub(super) changed_ticks: ThinArrayPtr<UnsafeCell<Tick>>,
+    /// updated when data is added, removed, or replaced in the column.
+    pub(super) changed_tick: Tick,
     #[cfg(feature = "track_change_detection")]
     pub(super) changed_by: ThinArrayPtr<UnsafeCell<&'static Location<'static>>>,
 }
@@ -30,6 +32,7 @@ impl ThinColumn {
             },
             added_ticks: ThinArrayPtr::with_capacity(capacity),
             changed_ticks: ThinArrayPtr::with_capacity(capacity),
+            changed_tick: Tick::new(0),
             #[cfg(feature = "track_change_detection")]
             changed_by: ThinArrayPtr::with_capacity(capacity),
         }
@@ -151,6 +154,7 @@ impl ThinColumn {
             .changed_ticks
             .get_unchecked_mut(row.as_usize())
             .get_mut() = tick;
+        self.changed_tick = tick;
         #[cfg(feature = "track_change_detection")]
         {
             *self.changed_by.get_unchecked_mut(row.as_usize()).get_mut() = caller;
@@ -175,6 +179,8 @@ impl ThinColumn {
             .changed_ticks
             .get_unchecked_mut(row.as_usize())
             .get_mut() = change_tick;
+        // TODO: updating this here might lead to data races, need to investigate more
+        self.changed_tick = change_tick;
         #[cfg(feature = "track_change_detection")]
         {
             *self.changed_by.get_unchecked_mut(row.as_usize()).get_mut() = caller;
@@ -232,6 +238,8 @@ impl ThinColumn {
     /// `len` is the actual length of this column
     #[inline]
     pub(crate) unsafe fn check_change_ticks(&mut self, len: usize, change_tick: Tick) {
+        self.changed_tick.check_tick(change_tick);
+
         for i in 0..len {
             // SAFETY:
             // - `i` < `len`
@@ -340,6 +348,8 @@ impl ThinColumn {
 #[derive(Debug)]
 pub struct Column {
     pub(super) data: BlobVec,
+    /// coarse change tick for column
+    pub(super) changed_tick: Tick,
     pub(super) added_ticks: Vec<UnsafeCell<Tick>>,
     pub(super) changed_ticks: Vec<UnsafeCell<Tick>>,
     #[cfg(feature = "track_change_detection")]
@@ -353,6 +363,7 @@ impl Column {
         Column {
             // SAFETY: component_info.drop() is valid for the types that will be inserted.
             data: unsafe { BlobVec::new(component_info.layout(), component_info.drop(), capacity) },
+            changed_tick: Tick::new(0),
             added_ticks: Vec::with_capacity(capacity),
             changed_ticks: Vec::with_capacity(capacity),
             #[cfg(feature = "track_change_detection")]
@@ -385,6 +396,7 @@ impl Column {
             .changed_ticks
             .get_unchecked_mut(row.as_usize())
             .get_mut() = change_tick;
+        self.changed_tick = change_tick;
         #[cfg(feature = "track_change_detection")]
         {
             *self.changed_by.get_unchecked_mut(row.as_usize()).get_mut() = caller;
@@ -649,6 +661,7 @@ impl Column {
 
     #[inline]
     pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
+        self.changed_tick.check_tick(change_tick);
         for component_ticks in &mut self.added_ticks {
             component_ticks.get_mut().check_tick(change_tick);
         }
