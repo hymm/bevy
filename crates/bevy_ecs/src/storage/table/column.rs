@@ -298,6 +298,16 @@ impl ThinColumn {
         self.data.get_sub_slice(len)
     }
 
+    /// Fetches the data pointer to the first element of the [`ThinColumn`].
+    ///
+    /// The pointer is type erased, so using this function to fetch anything
+    /// other than the first element will require computing the offset using
+    /// the layout.
+    #[inline]
+    pub fn get_data_ptr(&self) -> Ptr<'_> {
+        self.data.get_ptr()
+    }
+
     /// Get a slice to the added [`ticks`](Tick) in this [`ThinColumn`].
     ///
     /// # Safety
