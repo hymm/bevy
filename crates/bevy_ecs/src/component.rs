@@ -862,7 +862,7 @@ pub struct ComponentDescriptor {
     // SAFETY: this function must be safe to call with pointers pointing to items of the type
     // this descriptor describes.
     // None if the underlying type doesn't need to be dropped
-    drop: Option<for<'a> unsafe fn(OwningPtr<'a>)>,
+    pub(crate) drop: Option<for<'a> unsafe fn(OwningPtr<'a>)>,
     mutable: bool,
 }
 
