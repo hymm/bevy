@@ -120,6 +120,49 @@ impl DynamicBundle {
         }
         (new_ptr, layout)
     }
+
+    /// Get a reference to a value that was previously stored
+    pub fn get<T: Component>(&self) -> Option<&T> {
+        let type_id = TypeId::of::<T>();
+        let index = self.indices.get(&type_id)?;
+        let (_, offset) = self.info[*index];
+        // SAFETY: offset is always within bounds
+        let ptr = unsafe { self.data.add(offset) };
+        // SAFETY: data was stored so that it could be dereferenced...
+        Some(unsafe { &*(ptr.as_ptr() as *const T) })
+    }
+
+    /// Get a reference to a value that was previously stored
+    pub fn get_mut<T: Component>(&mut self) -> Option<&mut T> {
+        let type_id = TypeId::of::<T>();
+        let index = self.indices.get(&type_id)?;
+        let (_, offset) = self.info[*index];
+        // SAFETY: offset is always within bounds
+        let ptr = unsafe { self.data.add(offset) };
+        // SAFETY: data was stored so that it could be dereferenced...
+        Some(unsafe { &mut *(ptr.as_ptr() as *mut T) })
+    }
+
+    /// returns an iterator over the type ids. Will skip any values that don't have type id's
+    pub fn type_ids(&self) -> impl Iterator<Item = TypeId> + use<'_> {
+        self.info.iter().filter_map(|(desc, _)| desc.type_id())
+    }
+
+    /// Returns an iterator over OwningPtr's that can be used to insert the data into the world
+    pub fn consume(&mut self) -> impl Iterator<Item = OwningPtr<'_>> {
+        // TODO: this method should probably be unsafe
+        // TODO: should reset the memory?
+
+        self.info.iter().map(|(_desc, offset)| {
+            let ptr = unsafe { self.data.add(*offset) };
+            unsafe { OwningPtr::new(ptr) }
+        })
+    }
+
+    /// Returns true if there is no data stored.
+    pub fn is_empty(&self) -> bool {
+        self.cursor == 0
+    }
 }
 
 impl Default for DynamicBundle {
@@ -170,7 +213,7 @@ mod tests {
     };
 
     use super::*;
-    use crate as bevy_ecs;
+    use crate::{self as bevy_ecs, component::ComponentId, world::World};
     use bevy_ecs_macros::Component;
 
     #[derive(Component, Clone, Debug)]
@@ -187,6 +230,15 @@ mod tests {
             self.0.as_ref().fetch_add(1, Ordering::Relaxed);
         }
     }
+
+    #[derive(Component)]
+    struct C8(u8);
+    #[derive(Component)]
+    struct C16(u16);
+    #[derive(Component)]
+    struct C32(u32);
+    #[derive(Component)]
+    struct C64(u64);
 
     #[test]
     fn calls_drop_if_exists() {
@@ -207,5 +259,45 @@ mod tests {
         let (new_component, _new_counter) = DropCk::new_pair();
         bundle.add(new_component);
         assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn can_read_data() {
+        let mut bundle = DynamicBundle::default();
+        bundle.add(C8(1));
+        bundle.add(C16(2));
+        bundle.add(C32(3));
+        bundle.add(C64(4));
+
+        assert_eq!((*bundle.get::<C8>().unwrap()).0, 1);
+        assert_eq!((*bundle.get::<C16>().unwrap()).0, 2);
+        assert_eq!((*bundle.get::<C32>().unwrap()).0, 3);
+        assert_eq!((*bundle.get::<C64>().unwrap()).0, 4);
+    }
+
+    #[test]
+    fn insert_on_entity() {
+        let mut world = World::new();
+        world.register_component::<C32>();
+        let mut bundle = DynamicBundle::default();
+
+        bundle.add(C32(10));
+
+        let component_ids: Vec<ComponentId> = bundle
+            .type_ids()
+            .map(|type_id| world.components().get_id(type_id).unwrap())
+            .collect();
+        let mut entity = world.spawn_empty();
+        // TODO: this is not safe since type_ids() can skip values
+        unsafe { entity.insert_by_ids(&component_ids, bundle.consume()) };
+        assert_eq!(entity.get::<C32>().unwrap().0, 10);
+        assert!(bundle.is_empty());
+    }
+
+    #[test]
+    fn failed_insert_on_entity() {
+        // we need to make sure drop is called if insert on entity fails
+        // also how to recover if only some of the data has been copied.
+        todo!();
     }
 }
