@@ -525,36 +525,6 @@ impl Schedule {
     }
 }
 
-/// A directed acyclic graph structure.
-#[derive(Default)]
-pub struct Dag {
-    /// A directed graph.
-    graph: DiGraph,
-    /// A cached topological ordering of the graph.
-    topsort: Vec<NodeId>,
-}
-
-impl Dag {
-    fn new() -> Self {
-        Self {
-            graph: DiGraph::default(),
-            topsort: Vec::new(),
-        }
-    }
-
-    /// The directed graph of the stored systems, connected by their ordering dependencies.
-    pub fn graph(&self) -> &DiGraph {
-        &self.graph
-    }
-
-    /// A cached topological ordering of the graph.
-    ///
-    /// The order is determined by the ordering dependencies between systems.
-    pub fn cached_topsort(&self) -> &[NodeId] {
-        &self.topsort
-    }
-}
-
 /// A [`SystemSet`] with metadata, stored in a [`ScheduleGraph`].
 struct SystemSetNode {
     inner: InternedSystemSet,
@@ -1142,26 +1112,22 @@ impl ScheduleGraph {
         // check that there are no edges to system-type sets that have multiple instances
         self.check_system_type_set_ambiguity(&built.set_systems)?;
 
-        let mut dependency_flattened = self.get_dependency_flattened(&built.set_systems);
+        let mut dependency_flattened_graph = self.get_dependency_flattened(&built.set_systems);
 
         // modify graph with auto sync points
         if self.settings.auto_insert_apply_deferred {
-            dependency_flattened = self.auto_insert_apply_deferred(&mut dependency_flattened)?;
+            dependency_flattened_graph =
+                self.auto_insert_apply_deferred(&mut dependency_flattened_graph)?;
         }
 
         // topsort
-        let mut dependency_flattened_dag = Dag {
-            topsort: self.topsort_graph(&dependency_flattened, ReportCycles::Dependency)?,
-            graph: dependency_flattened,
-        };
+        let dependency_flattened_topsort =
+            self.topsort_graph(&dependency_flattened_graph, ReportCycles::Dependency)?;
 
-        let flat_results = check_graph(
-            &dependency_flattened_dag.graph,
-            &dependency_flattened_dag.topsort,
-        );
+        let flat_results = check_graph(&dependency_flattened_graph, &dependency_flattened_topsort);
 
         // remove redundant edges
-        dependency_flattened_dag.graph = flat_results.transitive_reduction;
+        dependency_flattened_graph = flat_results.transitive_reduction;
 
         // flatten: combine `in_set` with `ambiguous_with` information
         let ambiguous_with_flattened = self.get_ambiguous_with_flattened(&built.set_systems);
@@ -1177,7 +1143,11 @@ impl ScheduleGraph {
         self.built = Some(built);
 
         // build the schedule
-        Ok(self.build_schedule_inner(dependency_flattened_dag, hier_results.reachable))
+        Ok(self.build_schedule_inner(
+            dependency_flattened_graph,
+            dependency_flattened_topsort,
+            hier_results.reachable,
+        ))
     }
 
     // modify the graph to have sync nodes for any dependents after a system with deferred system params
@@ -1427,10 +1397,11 @@ impl ScheduleGraph {
 
     fn build_schedule_inner(
         &self,
-        dependency_flattened_dag: Dag,
+        dependency_flattened_graph: DiGraph,
+        dependency_flattened_topsort: Vec<NodeId>,
         hier_results_reachable: FixedBitSet,
     ) -> SystemSchedule {
-        let dg_system_ids = dependency_flattened_dag.topsort.clone();
+        let dg_system_ids = dependency_flattened_topsort.clone();
         let dg_system_idx_map = dg_system_ids
             .iter()
             .cloned()
@@ -1473,13 +1444,11 @@ impl ScheduleGraph {
         let mut system_dependencies = Vec::with_capacity(sys_count);
         let mut system_dependents = Vec::with_capacity(sys_count);
         for &sys_id in &dg_system_ids {
-            let num_dependencies = dependency_flattened_dag
-                .graph
+            let num_dependencies = dependency_flattened_graph
                 .neighbors_directed(sys_id, Incoming)
                 .count();
 
-            let dependents = dependency_flattened_dag
-                .graph
+            let dependents = dependency_flattened_graph
                 .neighbors_directed(sys_id, Outgoing)
                 .map(|dep_id| dg_system_idx_map[&dep_id])
                 .collect::<Vec<_>>();
