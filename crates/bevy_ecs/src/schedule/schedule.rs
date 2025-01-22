@@ -2653,17 +2653,22 @@ mod tests {
 
     #[test]
     fn get_system_id_with_system() {
-        fn my_system() {}
+        #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        struct TestSet;
+
+        fn test_system() {}
+        fn test_system_2() {}
 
         let mut world = World::new();
         let mut schedule = Schedule::new(TestSchedule);
 
-        schedule.add_systems(my_system);
+        schedule.add_systems((test_system, test_system_2).in_set(TestSet));
         let _ = schedule.initialize(&mut world);
-        let ids = schedule.graph().systems_in_set(my_system);
-        assert_eq!(ids.unwrap().len(), 1);
-    }
 
-    #[test]
-    fn get_system_ids_with_system_set() {}
+        let ids = schedule.graph().systems_in_set(test_system);
+        assert_eq!(ids.unwrap().len(), 1);
+
+        let ids = schedule.graph().systems_in_set(TestSet);
+        assert_eq!(ids.unwrap().len(), 2);
+    }
 }
