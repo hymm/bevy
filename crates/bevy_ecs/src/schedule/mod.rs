@@ -773,7 +773,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -803,7 +803,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -823,7 +823,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 3);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 3);
         }
 
         #[test]
@@ -836,7 +836,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 1);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 1);
         }
 
         #[test]
@@ -849,7 +849,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 1);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 1);
         }
 
         #[test]
@@ -862,7 +862,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 1);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 1);
         }
 
         #[test]
@@ -879,7 +879,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -897,7 +897,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 3);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 3);
         }
 
         /// Test that when a struct is both a Resource and a Component, they do not
@@ -912,7 +912,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -925,7 +925,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -938,7 +938,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -951,7 +951,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 1);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 1);
         }
 
         #[test]
@@ -964,7 +964,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 1);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 1);
         }
 
         #[test]
@@ -984,7 +984,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 3);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 3);
         }
 
         // Tests for silencing and resolving ambiguities
@@ -1002,7 +1002,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -1019,7 +1019,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -1039,7 +1039,7 @@ mod tests {
 
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[test]
@@ -1053,7 +1053,7 @@ mod tests {
             ));
             let _ = schedule.initialize(&mut world);
 
-            assert_eq!(schedule.graph().conflicting_systems().len(), 0);
+            assert_eq!(schedule.graph().conflicting_systems().unwrap().len(), 0);
         }
 
         #[derive(ScheduleLabel, Hash, PartialEq, Eq, Debug, Clone)]
@@ -1089,7 +1089,7 @@ mod tests {
 
             let ambiguities: Vec<_> = schedule
                 .graph()
-                .conflicts_to_string(schedule.graph().conflicting_systems(), world.components())
+                .conflicts_to_string(schedule.graph().conflicting_systems().unwrap(), world.components())
                 .collect();
 
             let expected = &[
@@ -1138,7 +1138,7 @@ mod tests {
 
             let ambiguities: Vec<_> = schedule
                 .graph()
-                .conflicts_to_string(schedule.graph().conflicting_systems(), world.components())
+                .conflicts_to_string(schedule.graph().conflicting_systems().unwrap(), world.components())
                 .collect();
 
             assert_eq!(
@@ -1161,13 +1161,13 @@ mod tests {
             // check resource
             schedule.add_systems((resmut_system, res_system));
             schedule.initialize(&mut world).unwrap();
-            assert!(schedule.graph().conflicting_systems().is_empty());
+            assert!(schedule.graph().conflicting_systems().unwrap().is_empty());
 
             // check components
             world.allow_ambiguous_component::<A>();
             schedule.add_systems((write_component_system, read_component_system));
             schedule.initialize(&mut world).unwrap();
-            assert!(schedule.graph().conflicting_systems().is_empty());
+            assert!(schedule.graph().conflicting_systems().unwrap().is_empty());
         }
     }
 

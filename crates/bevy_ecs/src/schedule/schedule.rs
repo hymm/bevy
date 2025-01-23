@@ -594,7 +594,6 @@ pub struct ScheduleGraph {
     dependency_graph: DiGraph,
     ambiguous_with: UnGraph,
     ambiguous_with_all: HashSet<NodeId>,
-    conflicting_systems: Vec<(NodeId, NodeId, Vec<ComponentId>)>,
     anonymous_sets: usize,
     changed: bool,
     settings: ScheduleBuildSettings,
@@ -609,6 +608,7 @@ pub struct ScheduleGraph {
 pub struct ScheduleGraphBuilt {
     hierarchy_topsort: Vec<NodeId>,
     dependency_topsort: Vec<NodeId>,
+    conflicting_systems: Vec<(NodeId, NodeId, Vec<ComponentId>)>,
     set_systems: HashMap<NodeId, Vec<NodeId>>,
 }
 
@@ -626,7 +626,6 @@ impl ScheduleGraph {
             dependency_graph: DiGraph::default(),
             ambiguous_with: UnGraph::default(),
             ambiguous_with_all: HashSet::default(),
-            conflicting_systems: Vec::new(),
             anonymous_sets: 0,
             changed: false,
             settings: default(),
@@ -730,9 +729,9 @@ impl ScheduleGraph {
     /// Returns the list of systems that conflict with each other, i.e. have ambiguities in their access.
     ///
     /// If the `Vec<ComponentId>` is empty, the systems conflict on [`World`] access.
-    /// Must be called after [`ScheduleGraph::build_schedule`] to be non-empty.
-    pub fn conflicting_systems(&self) -> &[(NodeId, NodeId, Vec<ComponentId>)] {
-        &self.conflicting_systems
+    /// This must be called after [`ScheduleGraph::build_schedule`] to return `Some`.
+    pub fn conflicting_systems(&self) -> Option<&[(NodeId, NodeId, Vec<ComponentId>)]> {
+        self.built.as_ref().map(|built| &*built.conflicting_systems)
     }
 
     fn process_config<T: ProcessNodeConfig>(
@@ -1139,7 +1138,7 @@ impl ScheduleGraph {
             ignored_ambiguities,
         );
         self.optionally_check_conflicts(&conflicting_systems, components, schedule_label)?;
-        self.conflicting_systems = conflicting_systems;
+        built.conflicting_systems = conflicting_systems;
         self.built = Some(built);
 
         // build the schedule
