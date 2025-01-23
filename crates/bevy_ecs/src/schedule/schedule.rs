@@ -702,7 +702,7 @@ impl ScheduleGraph {
     }
 
     /// Returns iterator over all [`SystemId`]'s in a [SystemSet]
-    /// Returns `None` if the label is not found or the schedule is not built
+    /// Returns `None` if the label is not found or the schedule is not initialized.
     pub fn systems_in_set<M>(&self, system_set: impl IntoSystemSet<M>) -> Option<Vec<NodeId>> {
         let set = system_set.into_system_set();
         let system_set_id = self.system_set_ids.get(&set.intern())?;
@@ -710,12 +710,21 @@ impl ScheduleGraph {
         set_systems.get(system_set_id).cloned()
     }
 
-    /// Returns the [`Dag`] of the hierarchy.
+    /// Returns the [`DiGraph`] of the hierarchy.
     ///
     /// The hierarchy is a directed acyclic graph of the systems and sets,
     /// where an edge denotes that a system or set is the child of another set.
     pub fn hierarchy_graph(&self) -> &DiGraph {
         &self.hierarchy_graph
+    }
+
+    /// Returns the topological sort of the hierarchy. Will return `None` if the
+    /// schedule has not been initialized.
+    ///
+    /// The hierarchy is a directed acyclic graph of the systems and sets,
+    /// where an edge denotes that a system or set is the child of another set.
+    pub fn hierarchy_topsort(&self) -> Option<&[NodeId]> {
+        self.built.as_ref().map(|built| &*built.hierarchy_topsort)
     }
 
     /// Returns the [`Dag`] of the dependencies in the schedule.
@@ -724,6 +733,15 @@ impl ScheduleGraph {
     /// a system or set has to run before another system or set.
     pub fn dependency_graph(&self) -> &DiGraph {
         &self.dependency_graph
+    }
+
+    /// Returns the topological sort of the dependencies. Will return `None` if the
+    /// schedule has not been initialized.
+    ///
+    /// Nodes in this graph are systems and sets, and edges denote that
+    /// a system or set has to run before another system or set.
+    pub fn dependency_topsort(&self) -> Option<&[NodeId]> {
+        self.built.as_ref().map(|built| &*built.dependency_topsort)
     }
 
     /// Returns the list of systems that conflict with each other, i.e. have ambiguities in their access.
