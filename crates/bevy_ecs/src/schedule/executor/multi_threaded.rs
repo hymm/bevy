@@ -508,7 +508,7 @@ impl ExecutorState {
                     // SAFETY: `can_run` returned true for this system,
                     // which means no systems are currently borrowed.
                     unsafe {
-                        self.spawn_exclusive_system_task(context, system_index);
+                        self.run_or_spawn_exclusive_system_task(context, system_index);
                     }
                     check_for_new_ready_systems = false;
                     break;
@@ -700,30 +700,42 @@ impl ExecutorState {
 
     /// # Safety
     /// Caller must ensure no systems are currently borrowed.
-    unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
+    unsafe fn run_or_spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
         // SAFETY: this system is not running, no other reference exists
         let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
         // Move the full context object into the new future.
         let context = *context;
 
         if is_apply_deferred(system) {
-            // TODO: avoid allocation
-            let unapplied_systems = self.unapplied_systems.clone();
-            self.unapplied_systems.clear();
-            let task = async move {
-                // SAFETY: `can_run` returned true for this system, which means
-                // that no other systems currently have access to the world.
+            // TODO: this section is probably not necessary as applying commands are always send
+            // if system is send run it inline with the executor
+            if system.is_send() {
                 let world = unsafe { context.environment.world_cell.world_mut() };
-                let res = apply_deferred(&unapplied_systems, context.environment.systems, world);
+                let res = apply_deferred(&self.unapplied_systems, context.environment.systems, world);
                 context.system_completed(system_index, res, system);
-            };
-
-            context.scope.spawn_on_scope(task);
+                self.unapplied_systems.clear();
+            } else {
+                // TODO: avoid allocation
+                let unapplied_systems = self.unapplied_systems.clone();
+                self.unapplied_systems.clear();
+                let task = async move {
+                    // SAFETY: `can_run` returned true for this system, which means
+                    // that no other systems currently have access to the world.
+                    let world = unsafe { context.environment.world_cell.world_mut() };
+                    let res = apply_deferred(&unapplied_systems, context.environment.systems, world);
+                    context.system_completed(system_index, res, system);
+                };
+    
+                context.scope.spawn_on_scope(task);
+                self.exclusive_running = true;
+                self.local_thread_running = true;    
+            }
         } else {
-            let task = async move {
-                // SAFETY: `can_run` returned true for this system, which means
-                // that no other systems currently have access to the world.
-                let world = unsafe { context.environment.world_cell.world_mut() };
+            // SAFETY: `can_run` returned true for this system, which means
+            // that no other systems currently have access to the world.
+            let world = unsafe { context.environment.world_cell.world_mut() };
+                
+            if system.is_send() {
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     if let Err(err) = __rust_begin_short_backtrace::run(system, world) {
                         (context.error_handler)(
@@ -736,15 +748,30 @@ impl ExecutorState {
                     }
                 }));
                 context.system_completed(system_index, res, system);
-            };
+            } else {
+                let task = async move {
+                    let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        if let Err(err) = __rust_begin_short_backtrace::run(system, world) {
+                            (context.error_handler)(
+                                err,
+                                ErrorContext::System {
+                                    name: system.name(),
+                                    last_run: system.get_last_run(),
+                                },
+                            );
+                        }
+                    }));
+                    context.system_completed(system_index, res, system);
+                };
 
-            context.scope.spawn_on_scope(task);
+                context.scope.spawn_on_scope(task);
+            
+                self.exclusive_running = true;
+                self.local_thread_running = true;    
+            }
         }
-
-        self.exclusive_running = true;
-        self.local_thread_running = true;
     }
-
+    
     fn finish_system_and_handle_dependents(&mut self, result: SystemResult) {
         let SystemResult { system_index, .. } = result;
 
