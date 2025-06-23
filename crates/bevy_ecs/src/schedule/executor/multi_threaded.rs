@@ -3,6 +3,7 @@ use bevy_platform::cell::SyncUnsafeCell;
 use bevy_platform::sync::Arc;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
 use concurrent_queue::ConcurrentQueue;
+use log::info;
 use core::{any::Any, panic::AssertUnwindSafe};
 use fixedbitset::FixedBitSet;
 #[cfg(feature = "std")]
@@ -707,29 +708,10 @@ impl ExecutorState {
         let context = *context;
 
         if is_apply_deferred(system) {
-            // TODO: this section is probably not necessary as applying commands are always send
-            // if system is send run it inline with the executor
-            if system.is_send() {
-                let world = unsafe { context.environment.world_cell.world_mut() };
-                let res = apply_deferred(&self.unapplied_systems, context.environment.systems, world);
-                context.system_completed(system_index, res, system);
-                self.unapplied_systems.clear();
-            } else {
-                // TODO: avoid allocation
-                let unapplied_systems = self.unapplied_systems.clone();
-                self.unapplied_systems.clear();
-                let task = async move {
-                    // SAFETY: `can_run` returned true for this system, which means
-                    // that no other systems currently have access to the world.
-                    let world = unsafe { context.environment.world_cell.world_mut() };
-                    let res = apply_deferred(&unapplied_systems, context.environment.systems, world);
-                    context.system_completed(system_index, res, system);
-                };
-    
-                context.scope.spawn_on_scope(task);
-                self.exclusive_running = true;
-                self.local_thread_running = true;    
-            }
+            let world = unsafe { context.environment.world_cell.world_mut() };
+            let res = apply_deferred(&self.unapplied_systems, context.environment.systems, world);
+            context.system_completed(system_index, res, system);
+            self.unapplied_systems.clear();
         } else {
             // SAFETY: `can_run` returned true for this system, which means
             // that no other systems currently have access to the world.
@@ -748,6 +730,7 @@ impl ExecutorState {
                     }
                 }));
                 context.system_completed(system_index, res, system);
+                info!("exclusive system");
             } else {
                 let task = async move {
                     let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
