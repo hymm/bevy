@@ -1312,7 +1312,7 @@ unsafe impl<T: SystemBuffer> SystemParam for Deferred<'_, T> {
 }
 
 /// A dummy type that is [`!Send`](Send), to force systems to run on the main thread.
-pub struct NonSendMarker(PhantomData<*mut ()>);
+pub struct NonSendMarker(pub(crate) PhantomData<*mut ()>);
 
 // SAFETY: No world access.
 unsafe impl SystemParam for NonSendMarker {
@@ -2846,7 +2846,10 @@ impl Display for SystemParamValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{event::Event, system::assert_is_system};
+    use crate::{
+        event::Event,
+        system::{assert_is_system, IntoSystem, System},
+    };
     use core::cell::RefCell;
 
     // Compile test for https://github.com/bevyengine/bevy/pull/2838.
@@ -3105,5 +3108,21 @@ mod tests {
         schedule.run(&mut world);
 
         fn event_system(_: EventReader<MissingEvent>) {}
+    }
+
+    #[test]
+    fn exclusive_system_non_send_marker() {
+        let mut send_system = IntoSystem::into_system(|_world: &mut World| {});
+        let mut nonsend_system =
+            IntoSystem::into_system(|_world: &mut World, _marker: NonSendMarker| {});
+
+        let mut world = World::new();
+        send_system.initialize(&mut world);
+        nonsend_system.initialize(&mut world);
+
+        assert!(send_system.is_exclusive());
+        assert!(send_system.is_send());
+        assert!(nonsend_system.is_exclusive());
+        assert!(!nonsend_system.is_send());
     }
 }

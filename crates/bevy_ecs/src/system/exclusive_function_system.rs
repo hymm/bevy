@@ -59,6 +59,9 @@ where
 {
     type System = ExclusiveFunctionSystem<Marker, F>;
     fn into_system(func: Self) -> Self::System {
+        let mut system_meta = SystemMeta::new::<F>();
+        system_meta.set_exclusive();
+        
         ExclusiveFunctionSystem {
             func,
             #[cfg(feature = "hotpatching")]
@@ -67,7 +70,7 @@ where
             )
             .ptr_address(),
             param_state: None,
-            system_meta: SystemMeta::new::<F>(),
+            system_meta,
             marker: PhantomData,
         }
     }
@@ -90,11 +93,7 @@ where
 
     #[inline]
     fn flags(&self) -> SystemStateFlags {
-        // non-send , exclusive , no deferred
-        // the executor runs exclusive systems on the main thread, so this
-        // field reflects that constraint
-        // exclusive systems have no deferred system params
-        SystemStateFlags::NON_SEND | SystemStateFlags::EXCLUSIVE
+        self.system_meta.flags
     }
 
     #[inline]

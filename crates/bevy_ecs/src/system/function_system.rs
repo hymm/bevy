@@ -28,7 +28,7 @@ pub struct SystemMeta {
     pub(crate) name: DebugName,
     // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
     // SystemParams from overriding each other
-    flags: SystemStateFlags,
+    pub(crate) flags: SystemStateFlags,
     pub(crate) last_run: Tick,
     #[cfg(feature = "trace")]
     pub(crate) system_span: Span,
@@ -96,6 +96,12 @@ impl SystemMeta {
     #[inline]
     pub fn set_has_deferred(&mut self) {
         self.flags |= SystemStateFlags::DEFERRED;
+    }
+    
+    /// Marks the system as needing to run with exclusive access to the world.
+    #[inline]
+    pub fn set_exclusive(&mut self) {
+        self.flags |= SystemStateFlags::EXCLUSIVE;
     }
 }
 

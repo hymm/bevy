@@ -8,6 +8,8 @@ use bevy_platform::cell::SyncCell;
 use core::marker::PhantomData;
 use variadics_please::all_tuples;
 
+use super::NonSendMarker;
+
 /// A parameter that can be used in an exclusive system (a system with an `&mut World` parameter).
 /// Any parameters implementing this trait must come after the `&mut World` parameter.
 #[diagnostic::on_unimplemented(
@@ -83,6 +85,21 @@ impl<S: ?Sized> ExclusiveSystemParam for PhantomData<S> {
 
     fn get_param<'s>(_state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
         PhantomData
+    }
+}
+
+impl ExclusiveSystemParam for NonSendMarker {
+    type State = ();
+
+    type Item<'s> = Self;
+
+    fn init(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+        std::println!("set non send");
+        system_meta.set_non_send();
+    }
+
+    fn get_param<'s>(_state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+        Self(PhantomData)
     }
 }
 

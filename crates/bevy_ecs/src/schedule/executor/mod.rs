@@ -165,7 +165,7 @@ impl System for ApplyDeferred {
 
     fn flags(&self) -> SystemStateFlags {
         // non-send , exclusive , no deferred
-        SystemStateFlags::NON_SEND | SystemStateFlags::EXCLUSIVE
+        SystemStateFlags::EXCLUSIVE
     }
 
     unsafe fn run_unsafe(
