@@ -466,6 +466,8 @@ impl ExecutorState {
 
             ready_systems.clone_from(&self.ready_systems);
 
+            let should_run_inline = ready_systems.len() == 1 && self.running_systems.is_empty();
+
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
                 // SAFETY: Caller assured that these systems are not running.
@@ -524,7 +526,11 @@ impl ExecutorState {
                 //   so `System::is_exclusive` returned `false` when we called it.
                 // - `can_run` returned true, so no systems with conflicting world access are running.
                 unsafe {
-                    self.spawn_system_task(context, system_index);
+                    if should_run_inline && system.is_send() {
+                        self.run_system_task(context, system_index);
+                    } else {
+                        self.spawn_system_task(context, system_index);
+                    }
                 }
             }
         }
@@ -655,6 +661,39 @@ impl ExecutorState {
         }
 
         should_run
+    }
+
+    /// # Safety
+    /// - Caller must not alias systems that are running.
+    /// - `is_exclusive` must have returned `false` for the specified system.
+    /// - `world` must have permission to access the world data
+    ///   used by the specified system.
+    /// - system is send
+    unsafe fn run_system_task(&mut self, context: &Context, system_index: usize) {
+        // SAFETY: this system is not running, no other reference exists
+        let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
+        // Move the full context object into the new future.
+        let context = *context;
+        let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            // SAFETY:
+            // - The caller ensures that we have permission to
+            // access the world data used by the system.
+            // - `is_exclusive` returned false
+            unsafe {
+                if let Err(err) =
+                    __rust_begin_short_backtrace::run_unsafe(system, context.environment.world_cell)
+                {
+                    (context.error_handler)(
+                        err,
+                        ErrorContext::System {
+                            name: system.name(),
+                            last_run: system.get_last_run(),
+                        },
+                    );
+                }
+            };
+        }));
+        context.system_completed(system_index, res, system);
     }
 
     /// # Safety
