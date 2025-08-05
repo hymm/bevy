@@ -43,6 +43,7 @@ pub mod render_graph;
 pub mod render_phase;
 pub mod render_resource;
 pub mod renderer;
+pub mod required_assets;
 pub mod settings;
 pub mod storage;
 pub mod sync_component;
@@ -67,6 +68,7 @@ pub mod prelude {
             Mesh3d,
         },
         render_resource::Shader,
+        required_assets::RequiredRenderAssets,
         texture::{ImagePlugin, ManualTextureViews},
         view::{InheritedVisibility, Msaa, ViewVisibility, Visibility},
         ExtractSchedule,
@@ -105,6 +107,7 @@ use sync_world::{
 };
 
 use crate::gpu_readback::GpuReadbackPlugin;
+use crate::required_assets::required_assets_ready;
 use crate::{
     camera::CameraPlugin,
     mesh::{MeshPlugin, MorphPlugin, RenderMesh},
@@ -179,8 +182,6 @@ bitflags! {
 /// These can be useful for ordering, but you almost never want to add your systems to these sets.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
 pub enum RenderSystems {
-    /// This is used for applying the commands from the [`ExtractSchedule`]
-    ExtractCommands,
     /// Prepare assets that have been created/modified/removed this frame.
     PrepareAssets,
     /// Prepares extracted meshes.
@@ -227,6 +228,10 @@ pub enum RenderSystems {
 #[deprecated(since = "0.17.0", note = "Renamed to `RenderSystems`.")]
 pub type RenderSet = RenderSystems;
 
+/// Schedule responsible for controlling when the main render schedule [`Render`] runs.
+#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone, Default)]
+pub struct RenderMain;
+
 /// The startup schedule of the [`RenderApp`]
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone, Default)]
 pub struct RenderStartup;
@@ -246,7 +251,7 @@ impl Render {
 
         schedule.configure_sets(
             (
-                ExtractCommands,
+                PrepareAssets,
                 PrepareMeshes,
                 ManageViews,
                 Queue,
@@ -259,7 +264,6 @@ impl Render {
                 .chain(),
         );
 
-        schedule.configure_sets((ExtractCommands, PrepareAssets, PrepareMeshes, Prepare).chain());
         schedule.configure_sets(
             (QueueMeshes, QueueSweep)
                 .chain()
@@ -542,13 +546,30 @@ fn extract(main_world: &mut World, render_world: &mut World) {
     main_world.insert_resource(ScratchMainWorld(scratch_world));
 }
 
+fn run_render_schedule(world: &mut World) {
+    world.run_schedule(Render);
+}
+
 /// # Safety
 /// This function must be called from the main thread.
 unsafe fn initialize_render_app(app: &mut App) {
     app.init_resource::<ScratchMainWorld>();
 
     let mut render_app = SubApp::new();
-    render_app.update_schedule = Some(Render.intern());
+    let mut schedule = Schedule::new(RenderMain);
+    schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+    schedule.add_systems(
+        (
+            // We want to run these in the render world schedule to limit the time
+            // in extract.
+            apply_extract_commands,
+            run_render_schedule.run_if(required_assets_ready),
+        )
+            .chain(),
+    );
+    render_app.add_schedule(schedule);
+
+    render_app.update_schedule = Some(RenderMain.intern());
 
     let mut extract_schedule = Schedule::new(ExtractSchedule);
     // We skip applying any commands during the ExtractSchedule
@@ -564,13 +585,11 @@ unsafe fn initialize_render_app(app: &mut App) {
         .add_schedule(Render::base_schedule())
         .init_resource::<render_graph::RenderGraph>()
         .insert_resource(app.world().resource::<AssetServer>().clone())
+        .init_resource::<required_assets::RequiredRenderAssets>()
         .add_systems(ExtractSchedule, PipelineCache::extract_shaders)
         .add_systems(
             Render,
             (
-                // This set applies the commands from the extract schedule while the render schedule
-                // is running in parallel with the main app.
-                apply_extract_commands.in_set(RenderSystems::ExtractCommands),
                 (PipelineCache::process_pipeline_queue_system, render_system)
                     .chain()
                     .in_set(RenderSystems::Render),
