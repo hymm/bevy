@@ -96,24 +96,34 @@ pub fn init_meshlet_pipelines(
 
     let clear_visibility_buffer =
         load_embedded_asset!(asset_server.as_ref(), "clear_visibility_buffer.wgsl");
+    commands.add_required_asset(clear_visibility_buffer.id());
     let cull_instances = load_embedded_asset!(asset_server.as_ref(), "cull_instances.wgsl");
+    commands.add_required_asset(cull_instances.id());
     let cull_bvh = load_embedded_asset!(asset_server.as_ref(), "cull_bvh.wgsl");
+    commands.add_required_asset(cull_bvh.id());
     let cull_clusters = load_embedded_asset!(asset_server.as_ref(), "cull_clusters.wgsl");
+    commands.add_required_asset(cull_clusters.id());
     let visibility_buffer_software_raster = load_embedded_asset!(
         asset_server.as_ref(),
         "visibility_buffer_software_raster.wgsl"
     );
+    commands.add_required_asset(visibility_buffer_software_raster.id());
     let visibility_buffer_hardware_raster = load_embedded_asset!(
         asset_server.as_ref(),
         "visibility_buffer_hardware_raster.wgsl"
     );
+    commands.add_required_asset(visibility_buffer_hardware_raster.id());
     let resolve_render_targets =
         load_embedded_asset!(asset_server.as_ref(), "resolve_render_targets.wgsl");
+    commands.add_required_asset(resolve_render_targets.id());
     let remap_1d_to_2d_dispatch =
         load_embedded_asset!(asset_server.as_ref(), "remap_1d_to_2d_dispatch.wgsl");
+    commands.add_required_asset(remap_1d_to_2d_dispatch.id());
     let fill_counts = load_embedded_asset!(asset_server.as_ref(), "fill_counts.wgsl");
+    commands.add_required_asset(fill_counts.id());
     let meshlet_mesh_material =
         load_embedded_asset!(asset_server.as_ref(), "meshlet_mesh_material.wgsl");
+    commands.add_required_asset(meshlet_mesh_material.id());
 
     commands.insert_resource(MeshletPipelines {
         clear_visibility_buffer: pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {

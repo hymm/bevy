@@ -1,7 +1,8 @@
 use bevy_asset::{AssetServer, UntypedAssetId};
 use bevy_ecs::{
     resource::Resource,
-    system::{Local, Res},
+    system::{Commands, Local, Res},
+    world::World,
 };
 
 /// Some shaders should be ready before the render world runs.
@@ -12,8 +13,8 @@ pub struct RequiredRenderAssets {
 }
 
 impl RequiredRenderAssets {
-    pub fn add(&mut self, id: impl Into<UntypedAssetId>) {
-        self.asset_ids.push(id.into());
+    pub fn add(&mut self, id: UntypedAssetId) {
+        self.asset_ids.push(id);
     }
 }
 
@@ -38,5 +39,18 @@ pub fn required_assets_ready(
             *cached = Some(true);
         }
         ready
+    }
+}
+
+pub trait RegisterRequiredRenderAssets {
+    fn add_required_asset(&mut self, id: impl Into<UntypedAssetId>);
+}
+
+impl RegisterRequiredRenderAssets for Commands<'_, '_> {
+    fn add_required_asset(&mut self, id: impl Into<UntypedAssetId>) {
+        let untyped_id = id.into();
+        self.queue(move |world: &mut World| {
+            world.resource_mut::<RequiredRenderAssets>().add(untyped_id);
+        });
     }
 }

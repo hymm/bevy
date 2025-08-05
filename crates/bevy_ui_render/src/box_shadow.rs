@@ -15,6 +15,7 @@ use bevy_ecs::{
 };
 use bevy_image::BevyDefault as _;
 use bevy_math::{vec2, Affine2, FloatOrd, Rect, Vec2};
+use bevy_render::required_assets::RegisterRequiredRenderAssets;
 use bevy_render::sync_world::{MainEntity, TemporaryRenderEntity};
 use bevy_render::{
     render_phase::*,
@@ -119,9 +120,11 @@ pub fn init_box_shadow_pipeline(
         ),
     );
 
+    let shader = load_embedded_asset!(asset_server.as_ref(), "box_shadow.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(BoxShadowPipeline {
         view_layout,
-        shader: load_embedded_asset!(asset_server.as_ref(), "box_shadow.wgsl"),
+        shader,
     });
 }
 

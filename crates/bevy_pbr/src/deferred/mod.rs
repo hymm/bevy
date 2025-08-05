@@ -19,6 +19,7 @@ use bevy_core_pipeline::{
 use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_image::BevyDefault as _;
 use bevy_light::{EnvironmentMapLight, ShadowFilteringMethod};
+use bevy_render::required_assets::RegisterRequiredRenderAssets as _;
 use bevy_render::RenderStartup;
 use bevy_render::{
     extract_component::{
@@ -401,13 +402,13 @@ pub fn init_deferred_lighting_layout(
             uniform_buffer::<PbrDeferredLightingDepthId>(false),
         ),
     );
+    let deferred_lighting_shader =
+        load_embedded_asset!(asset_server.as_ref(), "deferred_lighting.wgsl");
+    commands.add_required_asset(deferred_lighting_shader.id());
     commands.insert_resource(DeferredLightingLayout {
         mesh_pipeline: mesh_pipeline.clone(),
         bind_group_layout_2: layout,
-        deferred_lighting_shader: load_embedded_asset!(
-            asset_server.as_ref(),
-            "deferred_lighting.wgsl"
-        ),
+        deferred_lighting_shader,
     });
 }
 

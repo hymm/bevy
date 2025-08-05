@@ -19,6 +19,7 @@ use bevy_render::{
     render_asset::prepare_assets,
     render_resource::binding_types::uniform_buffer,
     renderer::RenderAdapter,
+    required_assets::RegisterRequiredRenderAssets,
     sync_world::RenderEntity,
     view::{RenderVisibilityRanges, RetainedViewEntity, VISIBILITY_RANGES_STORAGE_BUFFER_COUNT},
     ExtractSchedule, Render, RenderApp, RenderDebugFlags, RenderStartup, RenderSystems,
@@ -333,11 +334,14 @@ pub fn init_prepass_pipeline(
     let depth_clip_control_supported = render_device
         .features()
         .contains(WgpuFeatures::DEPTH_CLIP_CONTROL);
+
+    let default_prepass_shader = load_embedded_asset!(asset_server.as_ref(), "prepass.wgsl");
+    commands.add_required_asset(default_prepass_shader.id());
     commands.insert_resource(PrepassPipeline {
         view_layout_motion_vectors,
         view_layout_no_motion_vectors,
         mesh_layouts: mesh_pipeline.mesh_layouts.clone(),
-        default_prepass_shader: load_embedded_asset!(asset_server.as_ref(), "prepass.wgsl"),
+        default_prepass_shader,
         skins_use_uniform_buffers: skin::skins_use_uniform_buffers(&render_device),
         depth_clip_control_supported,
         binding_arrays_are_usable: binding_arrays_are_usable(&render_device, &render_adapter),

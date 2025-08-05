@@ -16,6 +16,7 @@ use bevy_render::{
         ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets,
     view::{Msaa, ViewUniform, ViewUniforms},
 };
 use bevy_utils::prelude::default;
@@ -64,6 +65,8 @@ pub fn init_skybox_prepass_pipeline(
     fullscreen_shader: Res<FullscreenShader>,
     asset_server: Res<AssetServer>,
 ) {
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "skybox_prepass.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(SkyboxPrepassPipeline {
         bind_group_layout: render_device.create_bind_group_layout(
             "skybox_prepass_bind_group_layout",
@@ -76,7 +79,7 @@ pub fn init_skybox_prepass_pipeline(
             ),
         ),
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "skybox_prepass.wgsl"),
+        fragment_shader,
     });
 }
 

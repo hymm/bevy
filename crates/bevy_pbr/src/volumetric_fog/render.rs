@@ -38,6 +38,7 @@ use bevy_render::{
         TextureSampleType, TextureUsages, VertexState,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets as _,
     sync_world::RenderEntity,
     texture::GpuImage,
     view::{ExtractedView, Msaa, ViewDepthTexture, ViewTarget, ViewUniformOffset},
@@ -251,10 +252,13 @@ pub fn init_volumetric_fog_pipeline(
         render_device.create_bind_group_layout(&*description, &bind_group_layout_entries)
     });
 
+    let shader = load_embedded_asset!(asset_server.as_ref(), "volumetric_fog.wgsl");
+    commands.add_required_asset(shader.id());
+
     commands.insert_resource(VolumetricFogPipeline {
         mesh_view_layouts: mesh_view_layouts.clone(),
         volumetric_view_bind_group_layouts: bind_group_layouts,
-        shader: load_embedded_asset!(asset_server.as_ref(), "volumetric_fog.wgsl"),
+        shader,
     });
 }
 

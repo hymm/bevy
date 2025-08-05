@@ -28,6 +28,7 @@ use bevy_render::{
         ViewSortedRenderPhases,
     },
     render_resource::*,
+    required_assets::RegisterRequiredRenderAssets,
     view::{ExtractedView, Msaa, RenderLayers, ViewTarget},
     Render, RenderApp, RenderSystems,
 };
@@ -78,15 +79,19 @@ fn init_line_gizmo_pipelines(
     uniform_bind_group_layout: Res<LineGizmoUniformBindgroupLayout>,
     asset_server: Res<AssetServer>,
 ) {
+    let shader = load_embedded_asset!(asset_server.as_ref(), "lines.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(LineGizmoPipeline {
         mesh_pipeline: mesh_pipeline.clone(),
         uniform_layout: uniform_bind_group_layout.layout.clone(),
-        shader: load_embedded_asset!(asset_server.as_ref(), "lines.wgsl"),
+        shader,
     });
+    let shader = load_embedded_asset!(asset_server.as_ref(), "line_joints.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(LineJointGizmoPipeline {
         mesh_pipeline: mesh_pipeline.clone(),
         uniform_layout: uniform_bind_group_layout.layout.clone(),
-        shader: load_embedded_asset!(asset_server.as_ref(), "line_joints.wgsl"),
+        shader,
     });
 }
 

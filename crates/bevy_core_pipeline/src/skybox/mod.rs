@@ -23,6 +23,7 @@ use bevy_render::{
         *,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets,
     texture::GpuImage,
     view::{ExtractedView, Msaa, ViewTarget, ViewUniform, ViewUniforms},
     Render, RenderApp, RenderStartup, RenderSystems,
@@ -181,6 +182,7 @@ fn init_skybox_pipeline(
     asset_server: Res<AssetServer>,
 ) {
     let shader = load_embedded_asset!(asset_server.as_ref(), "skybox.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(SkyboxPipeline::new(&render_device, shader));
 }
 

@@ -32,6 +32,7 @@ use bevy_render::{
         TextureSampleType, TextureUsages,
     },
     renderer::{RenderContext, RenderDevice},
+    required_assets::RegisterRequiredRenderAssets,
     sync_component::SyncComponentPlugin,
     sync_world::RenderEntity,
     texture::{CachedTexture, TextureCache},
@@ -278,12 +279,14 @@ fn init_taa_pipeline(
         ),
     );
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "taa.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(TaaPipeline {
         taa_bind_group_layout,
         nearest_sampler,
         linear_sampler,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "taa.wgsl"),
+        fragment_shader,
     });
 }
 

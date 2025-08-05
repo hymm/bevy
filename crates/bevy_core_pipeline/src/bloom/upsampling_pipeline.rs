@@ -15,6 +15,7 @@ use bevy_render::{
         *,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets,
     view::ViewTarget,
 };
 use bevy_utils::default;
@@ -61,10 +62,12 @@ pub fn init_bloom_upscaling_pipeline(
         ),
     );
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "bloom.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(BloomUpsamplingPipeline {
         bind_group_layout,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "bloom.wgsl"),
+        fragment_shader,
     });
 }
 

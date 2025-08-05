@@ -11,6 +11,7 @@ use bevy_ecs::{
 };
 use bevy_image::BevyDefault as _;
 use bevy_math::{Affine2, FloatOrd, Rect, Vec2};
+use bevy_render::required_assets::RegisterRequiredRenderAssets as _;
 use bevy_render::{
     globals::{GlobalsBuffer, GlobalsUniform},
     load_shader_library,
@@ -199,19 +200,25 @@ pub fn init_ui_material_pipeline<M: UiMaterial>(
 
     let load_default = || load_embedded_asset!(asset_server.as_ref(), "ui_material.wgsl");
 
+    let vertex_shader = match M::vertex_shader() {
+        ShaderRef::Default => load_default(),
+        ShaderRef::Handle(handle) => handle,
+        ShaderRef::Path(path) => asset_server.load(path),
+    };
+    commands.add_required_asset(vertex_shader.id());
+
+    let fragment_shader = match M::fragment_shader() {
+        ShaderRef::Default => load_default(),
+        ShaderRef::Handle(handle) => handle,
+        ShaderRef::Path(path) => asset_server.load(path),
+    };
+    commands.add_required_asset(fragment_shader.id());
+
     commands.insert_resource(UiMaterialPipeline::<M> {
         ui_layout,
         view_layout,
-        vertex_shader: match M::vertex_shader() {
-            ShaderRef::Default => load_default(),
-            ShaderRef::Handle(handle) => handle,
-            ShaderRef::Path(path) => asset_server.load(path),
-        },
-        fragment_shader: match M::fragment_shader() {
-            ShaderRef::Default => load_default(),
-            ShaderRef::Handle(handle) => handle,
-            ShaderRef::Path(path) => asset_server.load(path),
-        },
+        vertex_shader,
+        fragment_shader,
         marker: PhantomData,
     });
 }

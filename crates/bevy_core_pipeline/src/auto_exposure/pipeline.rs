@@ -8,6 +8,7 @@ use bevy_render::{
     globals::GlobalsUniform,
     render_resource::{binding_types::*, *},
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets as _,
     view::ViewUniform,
 };
 use bevy_utils::default;
@@ -52,6 +53,8 @@ pub fn init_auto_exposure_pipeline(
     render_device: Res<RenderDevice>,
     asset_server: Res<AssetServer>,
 ) {
+    let histogram_shader = load_embedded_asset!(asset_server.as_ref(), "auto_exposure.wgsl");
+    commands.add_required_asset(histogram_shader.id());
     commands.insert_resource(AutoExposurePipeline {
         histogram_layout: render_device.create_bind_group_layout(
             "compute histogram bind group",
@@ -70,7 +73,7 @@ pub fn init_auto_exposure_pipeline(
                 ),
             ),
         ),
-        histogram_shader: load_embedded_asset!(asset_server.as_ref(), "auto_exposure.wgsl"),
+        histogram_shader,
     });
 }
 

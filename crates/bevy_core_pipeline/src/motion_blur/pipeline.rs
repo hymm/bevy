@@ -21,6 +21,7 @@ use bevy_render::{
         SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat, TextureSampleType,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets,
     view::{ExtractedView, Msaa, ViewTarget},
 };
 use bevy_utils::default;
@@ -101,6 +102,7 @@ pub fn init_motion_blur_pipeline(
 ) {
     let fullscreen_shader = fullscreen_shader.clone();
     let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "motion_blur.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(MotionBlurPipeline::new(
         &render_device,
         fullscreen_shader,

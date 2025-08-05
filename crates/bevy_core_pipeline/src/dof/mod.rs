@@ -48,6 +48,7 @@ use bevy_render::{
         TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     },
     renderer::{RenderContext, RenderDevice},
+    required_assets::RegisterRequiredRenderAssets,
     sync_component::SyncComponentPlugin,
     sync_world::RenderEntity,
     texture::{CachedTexture, TextureCache},
@@ -675,11 +676,13 @@ pub fn prepare_depth_of_field_pipelines(
     asset_server: Res<AssetServer>,
 ) {
     for (entity, view, depth_of_field, view_bind_group_layouts, msaa) in view_targets.iter() {
+        let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "dof.wgsl");
+        commands.add_required_asset(fragment_shader.id());
         let dof_pipeline = DepthOfFieldPipeline {
             view_bind_group_layouts: view_bind_group_layouts.clone(),
             global_bind_group_layout: global_bind_group_layout.layout.clone(),
             fullscreen_shader: fullscreen_shader.clone(),
-            fragment_shader: load_embedded_asset!(asset_server.as_ref(), "dof.wgsl"),
+            fragment_shader,
         };
 
         // We'll need these two flags to create the `DepthOfFieldPipelineKey`s.

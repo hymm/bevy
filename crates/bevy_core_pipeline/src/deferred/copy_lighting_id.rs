@@ -10,6 +10,7 @@ use bevy_render::{
     camera::ExtractedCamera,
     render_resource::{binding_types::texture_2d, *},
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets as _,
     texture::{CachedTexture, TextureCache},
     view::ViewTarget,
     Render, RenderApp, RenderStartup, RenderSystems,
@@ -129,6 +130,7 @@ pub fn init_copy_deferred_lighting_id_pipeline(
 
     let vertex_state = fullscreen_shader.to_vertex_state();
     let shader = load_embedded_asset!(asset_server.as_ref(), "copy_deferred_lighting_id.wgsl");
+    commands.add_required_asset(shader.id());
 
     let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
         label: Some("copy_deferred_lighting_id_pipeline".into()),

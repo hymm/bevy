@@ -25,6 +25,7 @@ use bevy_render::{
     render_phase::*,
     render_resource::{binding_types::uniform_buffer, *},
     renderer::{RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets,
     sync_world::TemporaryRenderEntity,
     view::*,
     Extract, ExtractSchedule, Render, RenderSystems,
@@ -110,9 +111,11 @@ pub fn init_gradient_pipeline(
         ),
     );
 
+    let shader = load_embedded_asset!(asset_server.as_ref(), "gradient.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(GradientPipeline {
         view_layout,
-        shader: load_embedded_asset!(asset_server.as_ref(), "gradient.wgsl"),
+        shader,
     });
 }
 

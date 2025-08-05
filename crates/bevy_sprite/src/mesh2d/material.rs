@@ -25,6 +25,7 @@ use bevy_reflect::{prelude::ReflectDefault, Reflect};
 use bevy_render::camera::extract_cameras;
 use bevy_render::render_phase::{DrawFunctionId, InputUniformIndex};
 use bevy_render::render_resource::CachedRenderPipelineId;
+use bevy_render::required_assets::RegisterRequiredRenderAssets;
 use bevy_render::view::RenderVisibleEntities;
 use bevy_render::RenderStartup;
 use bevy_render::{
@@ -471,19 +472,29 @@ pub fn init_material_2d_pipeline<M: Material2d>(
 ) {
     let material2d_layout = M::bind_group_layout(&render_device);
 
+    let vertex_shader = match M::vertex_shader() {
+        ShaderRef::Default => None,
+        ShaderRef::Handle(handle) => Some(handle),
+        ShaderRef::Path(path) => Some(asset_server.load(path)),
+    };
+    if let Some(ref handle) = vertex_shader {
+        commands.add_required_asset(handle.id());
+    }
+
+    let fragment_shader = match M::fragment_shader() {
+        ShaderRef::Default => None,
+        ShaderRef::Handle(handle) => Some(handle),
+        ShaderRef::Path(path) => Some(asset_server.load(path)),
+    };
+    if let Some(ref handle) = fragment_shader {
+        commands.add_required_asset(handle.id());
+    }
+
     commands.insert_resource(Material2dPipeline::<M> {
         mesh2d_pipeline: mesh_2d_pipeline.clone(),
         material2d_layout,
-        vertex_shader: match M::vertex_shader() {
-            ShaderRef::Default => None,
-            ShaderRef::Handle(handle) => Some(handle),
-            ShaderRef::Path(path) => Some(asset_server.load(path)),
-        },
-        fragment_shader: match M::fragment_shader() {
-            ShaderRef::Default => None,
-            ShaderRef::Handle(handle) => Some(handle),
-            ShaderRef::Path(path) => Some(asset_server.load(path)),
-        },
+        vertex_shader,
+        fragment_shader,
         marker: PhantomData,
     });
 }

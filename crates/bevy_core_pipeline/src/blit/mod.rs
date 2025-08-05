@@ -8,6 +8,7 @@ use bevy_render::{
         *,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets,
     RenderApp, RenderStartup,
 };
 use bevy_utils::default;
@@ -57,11 +58,13 @@ pub fn init_blit_pipeline(
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "blit.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(BlitPipeline {
         layout,
         sampler,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "blit.wgsl"),
+        fragment_shader,
     });
 }
 

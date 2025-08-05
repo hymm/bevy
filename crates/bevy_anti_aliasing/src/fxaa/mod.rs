@@ -17,6 +17,7 @@ use bevy_render::{
         *,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets as _,
     view::{ExtractedView, ViewTarget},
     Render, RenderApp, RenderStartup, RenderSystems,
 };
@@ -152,11 +153,13 @@ pub fn init_fxaa_pipeline(
         ..default()
     });
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "fxaa.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(FxaaPipeline {
         texture_bind_group,
         sampler,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "fxaa.wgsl"),
+        fragment_shader,
     });
 }
 

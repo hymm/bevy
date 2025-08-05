@@ -35,6 +35,7 @@ use bevy_render::{
         TextureDimension, TextureFormat, TextureSampleType,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets,
     texture::GpuImage,
     view::{ExtractedView, ViewTarget},
     Render, RenderApp, RenderStartup, RenderSystems,
@@ -296,12 +297,14 @@ pub fn init_post_processing_pipeline(
         ..default()
     });
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "post_process.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(PostProcessingPipeline {
         bind_group_layout,
         source_sampler,
         chromatic_aberration_lut_sampler,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "post_process.wgsl"),
+        fragment_shader,
     });
 }
 

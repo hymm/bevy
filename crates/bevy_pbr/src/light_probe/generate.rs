@@ -39,6 +39,7 @@ use bevy_render::{
         TextureViewDescriptor, TextureViewDimension, UniformBuffer,
     },
     renderer::{RenderAdapter, RenderContext, RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets as _,
     settings::WgpuFeatures,
     sync_component::SyncComponentPlugin,
     sync_world::RenderEntity,
@@ -371,8 +372,11 @@ pub fn initialize_generated_environment_map_resources(
     }
 
     let downsampling_shader = load_embedded_asset!(asset_server.as_ref(), "downsample.wgsl");
+    commands.add_required_asset(downsampling_shader.id());
     let env_filter_shader = load_embedded_asset!(asset_server.as_ref(), "environment_filter.wgsl");
+    commands.add_required_asset(env_filter_shader.id());
     let copy_shader = load_embedded_asset!(asset_server.as_ref(), "copy.wgsl");
+    commands.add_required_asset(copy_shader.id());
 
     // First pass for base mip Levels (0-5)
     let downsample_first = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {

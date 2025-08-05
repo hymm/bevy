@@ -18,6 +18,7 @@ use bevy_render::{
     render_phase::*,
     render_resource::{binding_types::uniform_buffer, *},
     renderer::{RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets as _,
     texture::GpuImage,
     view::*,
     Extract, ExtractSchedule, Render, RenderSystems,
@@ -129,10 +130,12 @@ pub fn init_ui_texture_slice_pipeline(
         ),
     );
 
+    let shader = load_embedded_asset!(asset_server.as_ref(), "ui_texture_slice.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(UiTextureSlicePipeline {
         view_layout,
         image_layout,
-        shader: load_embedded_asset!(asset_server.as_ref(), "ui_texture_slice.wgsl"),
+        shader,
     });
 }
 

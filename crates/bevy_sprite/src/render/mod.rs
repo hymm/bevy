@@ -19,7 +19,6 @@ use bevy_ecs::{
 use bevy_image::{BevyDefault, Image, ImageSampler, TextureAtlasLayout, TextureFormatPixelInfo};
 use bevy_math::{Affine3A, FloatOrd, Quat, Rect, Vec2, Vec4};
 use bevy_platform::collections::HashMap;
-use bevy_render::view::{RenderVisibleEntities, RetainedViewEntity};
 use bevy_render::{
     render_asset::RenderAssets,
     render_phase::{
@@ -38,6 +37,10 @@ use bevy_render::{
         ViewVisibility,
     },
     Extract,
+};
+use bevy_render::{
+    required_assets::RegisterRequiredRenderAssets,
+    view::{RenderVisibleEntities, RetainedViewEntity},
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::default;
@@ -114,11 +117,13 @@ pub fn init_sprite_pipeline(
         }
     };
 
+    let shader = load_embedded_asset!(asset_server.as_ref(), "sprite.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(SpritePipeline {
         view_layout,
         material_layout,
         dummy_white_gpu_image,
-        shader: load_embedded_asset!(asset_server.as_ref(), "sprite.wgsl"),
+        shader,
     });
 }
 

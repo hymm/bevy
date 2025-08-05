@@ -329,9 +329,11 @@ pub fn init_wireframe_2d_pipeline(
     mesh_2d_pipeline: Res<Mesh2dPipeline>,
     asset_server: Res<AssetServer>,
 ) {
+    let shader = load_embedded_asset!(asset_server.as_ref(), "wireframe2d.wgsl");
+    commands.add_required_asset(shader.id());
     commands.insert_resource(Wireframe2dPipeline {
         mesh_pipeline: mesh_2d_pipeline.clone(),
-        shader: load_embedded_asset!(asset_server.as_ref(), "wireframe2d.wgsl"),
+        shader,
     });
 }
 

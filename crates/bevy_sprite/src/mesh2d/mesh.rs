@@ -1,5 +1,6 @@
 use bevy_app::Plugin;
 use bevy_asset::{embedded_asset, load_embedded_asset, AssetId, AssetServer, Handle};
+use bevy_render::required_assets::RegisterRequiredRenderAssets as _;
 use bevy_render::{load_shader_library, RenderStartup};
 
 use crate::{tonemapping_pipeline_key, Material2dBindGroupId};
@@ -162,7 +163,11 @@ pub fn init_batched_instance_buffer(mut commands: Commands, render_device: Res<R
     commands.insert_resource(BatchedInstanceBuffer::<Mesh2dUniform>::new(&render_device));
 }
 
-fn load_mesh2d_bindings(render_device: Res<RenderDevice>, asset_server: Res<AssetServer>) {
+fn load_mesh2d_bindings(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    asset_server: Res<AssetServer>,
+) {
     let mut mesh_bindings_shader_defs = Vec::with_capacity(1);
 
     if let Some(per_object_buffer_batch_size) =
@@ -185,6 +190,7 @@ fn load_mesh2d_bindings(render_device: Res<RenderDevice>, asset_server: Res<Asse
             }
         }
     );
+    commands.add_required_asset(handle.id());
     // Forget the handle so we don't have to store it anywhere, and we keep the embedded asset
     // loaded. Note: This is what happens in `load_shader_library` internally.
     core::mem::forget(handle);
@@ -353,12 +359,14 @@ pub fn init_mesh_2d_pipeline(
             mip_level_count: image.texture_descriptor.mip_level_count,
         }
     };
+
+    let shader = load_embedded_asset!(asset_server.as_ref(), "mesh2d.wgsl");
     commands.insert_resource(Mesh2dPipeline {
         view_layout,
         mesh_layout,
         dummy_white_gpu_image,
         per_object_buffer_batch_size: GpuArrayBuffer::<Mesh2dUniform>::batch_size(&render_device),
-        shader: load_embedded_asset!(asset_server.as_ref(), "mesh2d.wgsl"),
+        shader,
     });
 }
 

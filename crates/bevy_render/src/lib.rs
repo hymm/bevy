@@ -68,7 +68,7 @@ pub mod prelude {
             Mesh3d,
         },
         render_resource::Shader,
-        required_assets::RequiredRenderAssets,
+        required_assets::RegisterRequiredRenderAssets as _,
         texture::{ImagePlugin, ManualTextureViews},
         view::{InheritedVisibility, Msaa, ViewVisibility, Visibility},
         ExtractSchedule,

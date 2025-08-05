@@ -71,6 +71,7 @@ use bevy_render::{
         TextureView, VertexState,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
+    required_assets::RegisterRequiredRenderAssets as _,
     texture::{CachedTexture, GpuImage, TextureCache},
     view::{ExtractedView, ViewTarget},
     Render, RenderApp, RenderStartup, RenderSystems,
@@ -407,6 +408,7 @@ pub fn init_smaa_pipelines(
     );
 
     let shader = load_embedded_asset!(asset_server.as_ref(), "smaa.wgsl");
+    commands.add_required_asset(shader.id());
 
     commands.insert_resource(SmaaPipelines {
         edge_detection: SmaaEdgeDetectionPipeline {

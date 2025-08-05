@@ -14,6 +14,7 @@ use bevy_render::{
         *,
     },
     renderer::RenderDevice,
+    required_assets::RegisterRequiredRenderAssets as _,
     texture::{FallbackImage, GpuImage},
     view::{ExtractedView, ViewTarget, ViewUniform},
     Render, RenderApp, RenderStartup, RenderSystems,
@@ -310,11 +311,13 @@ pub fn init_tonemapping_pipeline(
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
+    let fragment_shader = load_embedded_asset!(asset_server.as_ref(), "tonemapping.wgsl");
+    commands.add_required_asset(fragment_shader.id());
     commands.insert_resource(TonemappingPipeline {
         texture_bind_group: tonemap_texture_bind_group,
         sampler,
         fullscreen_shader: fullscreen_shader.clone(),
-        fragment_shader: load_embedded_asset!(asset_server.as_ref(), "tonemapping.wgsl"),
+        fragment_shader,
     });
 }
 
