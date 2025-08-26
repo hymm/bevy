@@ -87,6 +87,8 @@ pub struct App {
     /// [`ScheduleRunnerPlugin`]: https://docs.rs/bevy/latest/bevy/app/struct.ScheduleRunnerPlugin.html
     pub(crate) runner: RunnerFn,
     default_error_handler: Option<ErrorHandler>,
+    /// span for time between constructing App and calling run
+    construction_span: Option<tracing::span::EnteredSpan>,
 }
 
 impl Debug for App {
@@ -102,6 +104,9 @@ impl Debug for App {
 impl Default for App {
     fn default() -> Self {
         let mut app = App::empty();
+        // TODO: this doesn't work. spans created before log plugin is constructed
+        // don't log.
+        app.construction_span = Some(info_span!("App Construction").entered());
         app.sub_apps.main.update_schedule = Some(Main.intern());
 
         #[cfg(feature = "bevy_reflect")]
@@ -147,6 +152,7 @@ impl App {
             },
             runner: Box::new(run_once),
             default_error_handler: None,
+            construction_span: None,
         }
     }
 
@@ -179,6 +185,7 @@ impl App {
     ///
     /// Panics if not all plugins have been built.
     pub fn run(&mut self) -> AppExit {
+        drop(self.construction_span.take());
         #[cfg(feature = "trace")]
         let _bevy_app_run_span = info_span!("bevy_app").entered();
         if self.is_building_plugins() {
