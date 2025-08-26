@@ -89,6 +89,7 @@ pub struct App {
     default_error_handler: Option<ErrorHandler>,
     // TODO: this should probably not be pub and use a setter?
     /// span for time between constructing App and calling run
+    #[cfg(feature = "trace")]
     pub construction_span: Option<tracing::span::EnteredSpan>,
 }
 
@@ -150,6 +151,7 @@ impl App {
             },
             runner: Box::new(run_once),
             default_error_handler: None,
+            #[cfg(feature = "trace")]
             construction_span: None,
         }
     }
@@ -183,9 +185,11 @@ impl App {
     ///
     /// Panics if not all plugins have been built.
     pub fn run(&mut self) -> AppExit {
+        #[cfg(feature = "trace")]
         drop(self.construction_span.take());
         #[cfg(feature = "trace")]
         let _bevy_app_run_span = info_span!("bevy_app").entered();
+
         if self.is_building_plugins() {
             panic!("App::run() was called while a plugin was building.");
         }
