@@ -411,5 +411,11 @@ impl Plugin for LogPlugin {
             (false, true) => error!("Could not set global tracing subscriber as it is already set. Consider disabling LogPlugin."),
             (false, false) => (),
         }
+
+        #[cfg(feature = "trace")]
+        {
+            // we do this in the LogPlugin because it doesn't work until the log plugin has been initialized
+            app.construction_span = Some(info_span!("bevy_app build").entered());
+        }
     }
 }
