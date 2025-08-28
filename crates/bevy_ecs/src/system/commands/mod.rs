@@ -27,8 +27,8 @@ use crate::{
     resource::Resource,
     schedule::ScheduleLabel,
     system::{
-        Deferred, IntoObserverSystem, IntoSystem, RegisteredSystem, SystemId, SystemInput,
-        SystemParamValidationError,
+        Deferred, IntoObserverSystem, IntoSystem, RegisteredSystem, ScheduleSystem, SystemId,
+        SystemInput, SystemParamValidationError,
     },
     world::{
         command_queue::RawCommandQueue, unsafe_world_cell::UnsafeWorldCell, CommandQueue,
@@ -1219,6 +1219,16 @@ impl<'w, 's> Commands<'w, 's> {
     /// ```
     pub fn run_schedule(&mut self, label: impl ScheduleLabel) {
         self.queue(command::run_schedule(label).handle_error_with(warn));
+    }
+
+    /// Add systems to a schedule. If the schedule is currently running then bevy will attempt to add the systems after
+    /// app.update has finished.
+    pub fn add_systems<M>(
+        &mut self,
+        label: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static,
+    ) {
+        self.queue(command::add_systems(label, systems));
     }
 }
 

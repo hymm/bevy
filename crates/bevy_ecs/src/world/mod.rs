@@ -3628,6 +3628,19 @@ impl World {
         schedules.allow_ambiguous_resource::<T>(self);
         self.insert_resource(schedules);
     }
+
+    /// add systems to a schedule
+    pub fn add_systems<M>(
+        &mut self,
+        label: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) {
+        // TODO: make this more robust. Also defer the mutation if the schedule is running.
+        self.resource_mut::<Schedules>()
+            .get_mut(label)
+            .unwrap()
+            .add_systems(systems);
+    }
 }
 
 impl fmt::Debug for World {

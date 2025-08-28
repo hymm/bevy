@@ -13,7 +13,7 @@ use crate::{
     message::{Message, Messages},
     resource::Resource,
     schedule::ScheduleLabel,
-    system::{IntoSystem, SystemId, SystemInput},
+    system::{IntoSystem, ScheduleSystem, SystemId, SystemInput},
     world::{FromWorld, SpawnBatchIter, World},
 };
 
@@ -253,4 +253,15 @@ pub fn write_message<M: Message>(message: M) -> impl Command {
 #[deprecated(since = "0.17.0", note = "Use `write_message` instead.")]
 pub fn send_event<E: Message>(event: E) -> impl Command {
     write_message(event)
+}
+
+/// A [`Command`] to add a system to a schedule
+#[track_caller]
+pub fn add_systems<M>(
+    label: impl ScheduleLabel,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static,
+) -> impl Command {
+    move |world: &mut World| {
+        world.add_systems(label, systems);
+    }
 }
