@@ -446,30 +446,6 @@ where
 {
 }
 
-/// TODO
-pub type Join<A, B> = CombinatorSystem<JoinMarker, A, B>;
-
-/// TODO
-pub struct JoinMarker;
-impl<A, B> Combine<A, B> for JoinMarker
-where
-    A: System,
-    B: System,
-{
-    type In = (A::In, B::In);
-
-    type Out = (A::Out, B::Out);
-
-    fn combine<T>(
-        (a_in, b_in): <Self::In as SystemInput>::Inner<'_>,
-        data: &mut T,
-        a: impl FnOnce(SystemIn<'_, A>, &mut T) -> Result<A::Out, RunSystemError>,
-        b: impl FnOnce(SystemIn<'_, B>, &mut T) -> Result<B::Out, RunSystemError>,
-    ) -> Result<Self::Out, RunSystemError> {
-        Ok((a(a_in, data)?, b(b_in, data)?))
-    }
-}
-
 /// join...TODO
 pub fn join<
     Ma,
@@ -490,9 +466,34 @@ pub fn join<
     CombinatorSystem::new(a, b, DebugName::owned(name))
 }
 
+/// Combines the output of two systems into a tuple `(A::Out, B::Out)`.
+pub type Join<A, B> = CombinatorSystem<JoinMarker, A, B>;
+
+#[doc(hidden)]
+pub struct JoinMarker;
+impl<A, B> Combine<A, B> for JoinMarker
+where
+    A: System,
+    B: System,
+{
+    type In = (A::In, B::In);
+
+    type Out = (A::Out, B::Out);
+
+    fn combine<T>(
+        (a_in, b_in): <Self::In as SystemInput>::Inner<'_>,
+        data: &mut T,
+        a: impl FnOnce(SystemIn<'_, A>, &mut T) -> Result<A::Out, RunSystemError>,
+        b: impl FnOnce(SystemIn<'_, B>, &mut T) -> Result<B::Out, RunSystemError>,
+    ) -> Result<Self::Out, RunSystemError> {
+        Ok((a(a_in, data)?, b(b_in, data)?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prelude::In;
 
     #[test]
     fn exclusive_system_piping_is_possible() {
@@ -514,30 +515,22 @@ mod tests {
         schedule.run(&mut world);
     }
 
-    mod join_combinator {
-        use super::*;
-        use crate::prelude::In;
-
-        #[test]
-        fn join_simple_systems() {
-            fn system_1() -> usize {
-                5
-            }
-            fn system_2() -> usize {
-                6
-            }
-            fn system_3(In((a, b)): In<(usize, usize)>) -> usize {
-                a + b
-            }
-
-            let mut joined_system =
-                IntoSystem::into_system(join(system_1, system_2).pipe(system_3));
-            let mut world = World::new();
-            joined_system.initialize(&mut world);
-            let result = joined_system.run(((), ()), &mut world).unwrap();
-            assert_eq!(result, 11);
+    #[test]
+    fn join_systems() {
+        fn system_1() -> usize {
+            5
+        }
+        fn system_2() -> usize {
+            6
+        }
+        fn system_3(In((a, b)): In<(usize, usize)>) -> usize {
+            a + b
         }
 
-        fn join_with_input_lifetimes() {}
+        let mut joined_system = IntoSystem::into_system(join(system_1, system_2).pipe(system_3));
+        let mut world = World::new();
+        joined_system.initialize(&mut world);
+        let result = joined_system.run(((), ()), &mut world).unwrap();
+        assert_eq!(result, 11);
     }
 }
