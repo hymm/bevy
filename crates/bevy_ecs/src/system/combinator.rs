@@ -446,8 +446,91 @@ where
 {
 }
 
-/// join...TODO
-pub fn join<
+/// Returns a system that takes a tuple of the inputs `(A::In, B::In)` and returns
+/// a tuple of the outputs `(A::Out, B::Out)`. This can be useful for piping the results
+/// from 2 different systems into another system.
+///
+/// # Examples
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// #
+/// #
+/// fn system_1() -> usize {
+///     5
+/// }
+///
+/// fn system_2() -> usize {
+///    6
+/// }
+///
+/// fn add((In(a), In(b)): (In<usize>, In<usize>)) -> usize {
+///     a + b
+/// }
+///
+///
+///
+///
+/// ```
+pub fn join<Ma, Outa, Mb, Outb, A: IntoSystem<(), Outa, Ma>, B: IntoSystem<(), Outb, Mb>>(
+    a: A,
+    b: B,
+) -> Join<A::System, B::System> {
+    let a = IntoSystem::into_system(a);
+    let b = IntoSystem::into_system(b);
+    let name = format!("({}, {})", a.name(), b.name());
+    CombinatorSystem::new(a, b, DebugName::owned(name))
+}
+
+/// Combines the output of two systems into a tuple `(A::Out, B::Out)`.
+pub type Join<A, B> = CombinatorSystem<JoinMarker, A, B>;
+
+#[doc(hidden)]
+pub struct JoinMarker;
+impl<A, B> Combine<A, B> for JoinMarker
+where
+    A: System<In = ()>,
+    B: System<In = ()>,
+{
+    type In = ();
+
+    type Out = (A::Out, B::Out);
+
+    fn combine<T>(
+        _: <Self::In as SystemInput>::Inner<'_>,
+        data: &mut T,
+        a: impl FnOnce(SystemIn<'_, A>, &mut T) -> Result<A::Out, RunSystemError>,
+        b: impl FnOnce(SystemIn<'_, B>, &mut T) -> Result<B::Out, RunSystemError>,
+    ) -> Result<Self::Out, RunSystemError> {
+        Ok((a((), data)?, b((), data)?))
+    }
+}
+
+/// Returns a system that takes a tuple of the inputs `(A::In, B::In)` and returns
+/// a tuple of the outputs `(A::Out, B::Out)`. This can be useful for piping the results
+/// from 2 different systems into another system.
+///
+/// # Examples
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// #
+/// #
+/// fn system_1() -> usize {
+///     5
+/// }
+///
+/// fn system_2() -> usize {
+///    6
+/// }
+///
+/// fn add((In(a), In(b)): (In<usize>, In<usize>)) -> usize {
+///     a + b
+/// }
+///
+///
+///
+///
+/// ```
+pub fn join_with_input<
     Ma,
     Ina: SystemInput,
     Outa,
@@ -467,11 +550,11 @@ pub fn join<
 }
 
 /// Combines the output of two systems into a tuple `(A::Out, B::Out)`.
-pub type Join<A, B> = CombinatorSystem<JoinMarker, A, B>;
+pub type JoinInputs<A, B> = CombinatorSystem<JoinInputsMarker, A, B>;
 
 #[doc(hidden)]
-pub struct JoinMarker;
-impl<A, B> Combine<A, B> for JoinMarker
+pub struct JoinInputsMarker;
+impl<A, B> Combine<A, B> for JoinInputsMarker
 where
     A: System,
     B: System,
@@ -523,7 +606,7 @@ mod tests {
         fn system_2() -> usize {
             6
         }
-        fn system_3(In((a, b)): In<(usize, usize)>) -> usize {
+        fn system_3((In(a), In(b)): (In<usize>, In<usize>)) -> usize {
             a + b
         }
 
