@@ -126,15 +126,55 @@ pub fn empty_schedule_run(criterion: &mut Criterion) {
 
     let mut schedule = Schedule::default();
     schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+    // run schedule once to initialize it
+    schedule.run(app.world_mut());
     group.bench_function("SingleThreaded", |bencher| {
         bencher.iter(|| schedule.run(app.world_mut()));
     });
 
     let mut schedule = Schedule::default();
     schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::MultiThreaded);
+    // run schedule once to initialize it
+    schedule.run(app.world_mut());
     group.bench_function("MultiThreaded", |bencher| {
         bencher.iter(|| schedule.run(app.world_mut()));
     });
 
     group.finish();
+}
+
+pub fn serial_schedule(criterion: &mut Criterion) {
+    // empty system
+    fn empty_system() {}
+
+    let mut app = App::default();
+
+    let mut group = criterion.benchmark_group("serial_schedule");
+
+    let mut schedule = Schedule::default();
+    schedule.add_systems(
+        (
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+            empty_system,
+        )
+            .chain(),
+    );
+
+    schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+    group.bench_function("SingleThreaded", |bencher| {
+        bencher.iter(|| schedule.run(app.world_mut()));
+    });
+
+    schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::MultiThreaded);
+    group.bench_function("MultiThreaded", |bencher| {
+        bencher.iter(|| schedule.run(app.world_mut()));
+    });
 }
