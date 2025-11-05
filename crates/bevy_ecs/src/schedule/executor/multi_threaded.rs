@@ -117,6 +117,8 @@ pub struct ExecutorState {
     num_dependencies_remaining: Vec<usize>,
     /// System sets whose conditions have been evaluated.
     evaluated_sets: FixedBitSet,
+    /// Number of systems that have no remaining dependencies and are waiting to run.
+    num_ready_systems: usize,
     /// Systems that have no remaining dependencies and are waiting to run.
     ready_systems: FixedBitSet,
     /// copy of `ready_systems`
@@ -252,6 +254,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             .num_dependencies_remaining
             .clone_from(&schedule.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
+        state.num_ready_systems = self.starting_systems.count_ones(..);
 
         // If stepping is enabled, make sure we skip those systems that should
         // not be run.
@@ -265,6 +268,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             // though they had run
             for system_index in skipped_systems.ones() {
                 state.signal_dependents(system_index);
+                state.num_ready_systems -= 1;
                 state.ready_systems.remove(system_index);
             }
         }
@@ -408,6 +412,7 @@ impl ExecutorState {
             system_task_metadata: Vec::new(),
             set_condition_conflicting_systems: Vec::new(),
             num_running_systems: 0,
+            num_ready_systems: 0,
             num_dependencies_remaining: Vec::new(),
             local_thread_running: false,
             exclusive_running: false,
@@ -466,8 +471,7 @@ impl ExecutorState {
 
             ready_systems.clone_from(&self.ready_systems);
 
-            let can_run_exclusive =
-                ready_systems.count_ones(..) == 1 && self.num_running_systems == 0;
+            let can_run_exclusive = self.num_ready_systems == 1 && self.num_running_systems == 0;
 
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
@@ -492,6 +496,7 @@ impl ExecutorState {
                     continue;
                 }
 
+                self.num_ready_systems -= 1;
                 self.ready_systems.remove(system_index);
 
                 // SAFETY: `can_run` returned true, which means that:
@@ -819,6 +824,7 @@ impl ExecutorState {
             debug_assert!(*remaining >= 1);
             *remaining -= 1;
             if *remaining == 0 && !self.completed_systems.contains(dep_idx) {
+                self.num_ready_systems += 1;
                 self.ready_systems.insert(dep_idx);
             }
         }
