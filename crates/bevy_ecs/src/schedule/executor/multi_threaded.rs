@@ -466,7 +466,8 @@ impl ExecutorState {
 
             ready_systems.clone_from(&self.ready_systems);
 
-            let can_run_exclusive = ready_systems.len() == 1 && self.running_systems.is_empty();
+            let can_run_exclusive =
+                ready_systems.count_ones(..) == 1 && self.num_running_systems == 0;
 
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
