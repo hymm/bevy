@@ -535,7 +535,7 @@ where
 #[doc(hidden)]
 pub struct IsFunctionSystem;
 
-impl<Marker, Out, F> IntoSystem<F::In, Out, (IsFunctionSystem, Marker)> for F
+impl<Marker, Out, F> IntoSystem<F::In, Out, (IsFunctionSystem, Marker, Out)> for F
 where
     Out: 'static,
     Marker: 'static,
@@ -855,8 +855,7 @@ macro_rules! impl_system_function {
         )]
         impl<Out, Func, $($param: SystemParam),*> SystemParamFunction<fn($($param,)*) -> Out> for Func
         where
-            Func: Send + Sync + 'static,
-            for <'a> &'a mut Func:
+            Func: Send + Sync + 'static +
                 FnMut($($param),*) -> Out +
                 FnMut($(SystemParamItem<$param>),*) -> Out,
             Out: 'static
@@ -866,17 +865,8 @@ macro_rules! impl_system_function {
             type Param = ($($param,)*);
             #[inline]
             fn run(&mut self, _input: (), param_value: SystemParamItem< ($($param,)*)>) -> Out {
-                // Yes, this is strange, but `rustc` fails to compile this impl
-                // without using this function. It fails to recognize that `func`
-                // is a function, potentially because of the multiple impls of `FnMut`
-                fn call_inner<Out, $($param,)*>(
-                    mut f: impl FnMut($($param,)*)->Out,
-                    $($param: $param,)*
-                )->Out{
-                    f($($param,)*)
-                }
                 let ($($param,)*) = param_value;
-                call_inner(self, $($param),*)
+                self($($param,)*)
             }
         }
 
@@ -890,8 +880,7 @@ macro_rules! impl_system_function {
         )]
         impl<In, Out, Func, $($param: SystemParam),*> SystemParamFunction<(HasSystemInput, fn(In, $($param,)*) -> Out)> for Func
         where
-            Func: Send + Sync + 'static,
-            for <'a> &'a mut Func:
+            Func: Send + Sync + 'static +
                 FnMut(In, $($param),*) -> Out +
                 FnMut(In::Param<'_>, $(SystemParamItem<$param>),*) -> Out,
             In: SystemInput + 'static,
@@ -902,16 +891,8 @@ macro_rules! impl_system_function {
             type Param = ($($param,)*);
             #[inline]
             fn run(&mut self, input: In::Inner<'_>, param_value: SystemParamItem< ($($param,)*)>) -> Out {
-                fn call_inner<In: SystemInput, Out, $($param,)*>(
-                    _: PhantomData<In>,
-                    mut f: impl FnMut(In::Param<'_>, $($param,)*)->Out,
-                    input: In::Inner<'_>,
-                    $($param: $param,)*
-                )->Out{
-                    f(In::wrap(input), $($param,)*)
-                }
                 let ($($param,)*) = param_value;
-                call_inner(PhantomData::<In>, self, input, $($param),*)
+                self(In::wrap(input), $($param,)*)
             }
         }
     };
