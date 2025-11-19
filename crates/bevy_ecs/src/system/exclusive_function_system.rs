@@ -57,8 +57,7 @@ impl<Out, Marker, F> IntoSystem<F::In, Out, (IsExclusiveFunctionSystem, Marker, 
 where
     Out: 'static,
     Marker: 'static,
-    F::Out: IntoResult<Out>,
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<Marker, Out: IntoResult<Out>>,
 {
     type System = ExclusiveFunctionSystem<Marker, Out, F>;
     fn into_system(func: Self) -> Self::System {
@@ -248,8 +247,7 @@ macro_rules! impl_exclusive_system_function {
         )]
         impl<Out, Func, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<fn($($param,)*) -> Out> for Func
         where
-            Func: Send + Sync + 'static,
-            for <'a> &'a mut Func:
+            Func: Send + Sync + 'static +
                 FnMut(&mut World, $($param),*) -> Out +
                 FnMut(&mut World, $(ExclusiveSystemParamItem<$param>),*) -> Out,
             Out: 'static,
@@ -259,18 +257,8 @@ macro_rules! impl_exclusive_system_function {
             type Param = ($($param,)*);
             #[inline]
             fn run(&mut self, world: &mut World, _in: (), param_value: ExclusiveSystemParamItem< ($($param,)*)>) -> Out {
-                // Yes, this is strange, but `rustc` fails to compile this impl
-                // without using this function. It fails to recognize that `func`
-                // is a function, potentially because of the multiple impls of `FnMut`
-                fn call_inner<Out, $($param,)*>(
-                    mut f: impl FnMut(&mut World, $($param,)*) -> Out,
-                    world: &mut World,
-                    $($param: $param,)*
-                ) -> Out {
-                    f(world, $($param,)*)
-                }
                 let ($($param,)*) = param_value;
-                call_inner(self, world, $($param),*)
+                self(world, $($param),*)
             }
         }
 
@@ -284,8 +272,7 @@ macro_rules! impl_exclusive_system_function {
         )]
         impl<In, Out, Func, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<(HasExclusiveSystemInput, fn(In, $($param,)*) -> Out)> for Func
         where
-            Func: Send + Sync + 'static,
-            for <'a> &'a mut Func:
+            Func: Send + Sync + 'static +
                 FnMut(In, &mut World, $($param),*) -> Out +
                 FnMut(In::Param<'_>, &mut World, $(ExclusiveSystemParamItem<$param>),*) -> Out,
             In: SystemInput + 'static,
@@ -296,20 +283,8 @@ macro_rules! impl_exclusive_system_function {
             type Param = ($($param,)*);
             #[inline]
             fn run(&mut self, world: &mut World, input: In::Inner<'_>, param_value: ExclusiveSystemParamItem< ($($param,)*)>) -> Out {
-                // Yes, this is strange, but `rustc` fails to compile this impl
-                // without using this function. It fails to recognize that `func`
-                // is a function, potentially because of the multiple impls of `FnMut`
-                fn call_inner<In: SystemInput, Out, $($param,)*>(
-                    _: PhantomData<In>,
-                    mut f: impl FnMut(In::Param<'_>, &mut World, $($param,)*) -> Out,
-                    input: In::Inner<'_>,
-                    world: &mut World,
-                    $($param: $param,)*
-                ) -> Out {
-                    f(In::wrap(input), world, $($param,)*)
-                }
                 let ($($param,)*) = param_value;
-                call_inner(PhantomData::<In>, self, input, world, $($param),*)
+                self(In::wrap(input), world, $($param),*)
             }
         }
     };
