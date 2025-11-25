@@ -7,6 +7,7 @@ mod iter_frag_foreach_wide_sparse;
 mod iter_frag_sparse;
 mod iter_frag_wide;
 mod iter_frag_wide_sparse;
+mod iter_raw;
 mod iter_simple;
 mod iter_simple_foreach;
 mod iter_simple_foreach_hybrid;
@@ -38,6 +39,10 @@ fn iter_simple(c: &mut Criterion) {
     group.measurement_time(core::time::Duration::from_secs(4));
     group.bench_function("base", |b| {
         let mut bench = iter_simple::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("raw", |b| {
+        let mut bench = iter_raw::Benchmark::new();
         b.iter(move || bench.run());
     });
     group.bench_function("wide", |b| {
