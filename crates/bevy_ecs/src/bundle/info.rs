@@ -252,61 +252,71 @@ impl BundleInfo {
         // NOTE: get_components calls this closure on each component in "bundle order".
         // bundle_info.component_ids are also in "bundle order"
         let mut bundle_component = 0;
-        T::get_components(bundle, &mut |storage_type, component_ptr| {
-            let component_id = *self
-                .contributed_component_ids
-                .get_unchecked(bundle_component);
-            // SAFETY: bundle_component is a valid index for this bundle
-            let status = unsafe { bundle_component_status.get_status(bundle_component) };
-            match storage_type {
-                StorageType::Table => {
-                    let column =
+        // SAFETY:
+        // * Caller ensures only called once before apply effect.
+        // * The callback inserts the components into the correct storage type. // TODO: think about this safety a bit more
+        // * Caller ensures apply_effect is called exactly once after this method is called
+        unsafe {
+            T::get_components(bundle, &mut |storage_type, component_ptr| {
+                let component_id = *self
+                    .contributed_component_ids
+                    .get_unchecked(bundle_component);
+                // SAFETY: bundle_component is a valid index for this bundle
+                let status = bundle_component_status.get_status(bundle_component);
+                match storage_type {
+                    StorageType::Table => {
                         // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
                         // the target table contains the component.
-                        unsafe { table.get_column_mut(component_id).debug_checked_unwrap() };
-                    match (status, insert_mode) {
-                        (ComponentStatus::Added, _) => {
-                            column.initialize(table_row, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Replace) => {
-                            column.replace(table_row, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Keep) => {
-                            if let Some(drop_fn) = table.get_drop_for(component_id) {
-                                drop_fn(component_ptr);
+                        let column = table.get_column_mut(component_id).debug_checked_unwrap();
+                        match (status, insert_mode) {
+                            (ComponentStatus::Added, _) => {
+                                column.initialize(table_row, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Replace) => {
+                                column.replace(table_row, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Keep) => {
+                                if let Some(drop_fn) = table.get_drop_for(component_id) {
+                                    drop_fn(component_ptr);
+                                }
                             }
                         }
                     }
-                }
-                StorageType::SparseSet => {
-                    let sparse_set =
+                    StorageType::SparseSet => {
                         // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
                         // a sparse set exists for the component.
-                        unsafe { sparse_sets.get_mut(component_id).debug_checked_unwrap() };
-                    match (status, insert_mode) {
-                        (ComponentStatus::Added, _) | (_, InsertMode::Replace) => {
-                            sparse_set.insert(entity, component_ptr, change_tick, caller);
-                        }
-                        (ComponentStatus::Existing, InsertMode::Keep) => {
-                            if let Some(drop_fn) = sparse_set.get_drop() {
-                                drop_fn(component_ptr);
+                        let sparse_set = sparse_sets.get_mut(component_id).debug_checked_unwrap();
+                        match (status, insert_mode) {
+                            (ComponentStatus::Added, _) | (_, InsertMode::Replace) => {
+                                sparse_set.insert(entity, component_ptr, change_tick, caller);
+                            }
+                            (ComponentStatus::Existing, InsertMode::Keep) => {
+                                if let Some(drop_fn) = sparse_set.get_drop() {
+                                    drop_fn(component_ptr);
+                                }
                             }
                         }
                     }
                 }
-            }
-            bundle_component += 1;
-        });
+                bundle_component += 1;
+            });
+        }
 
         for required_component in required_components {
-            required_component.initialize(
-                table,
-                sparse_sets,
-                change_tick,
-                table_row,
-                entity,
-                caller,
-            );
+            // SAFETY:
+            // * Called in BundleInfo::write_components
+            // * Caller ensures table_row and entity correspond to a valid entity.
+            // * BundleInfo ensures that these required_components need initializing.
+            unsafe {
+                required_component.initialize(
+                    table,
+                    sparse_sets,
+                    change_tick,
+                    table_row,
+                    entity,
+                    caller,
+                );
+            }
         }
     }
 
@@ -315,9 +325,10 @@ impl BundleInfo {
     ///
     /// # Safety
     ///
-    /// `component_ptr` must point to a required component value that matches the given `component_id`. The `storage_type` must match
-    /// the type associated with `component_id`. The `entity` and `table_row` must correspond to an entity with an uninitialized
-    /// component matching `component_id`.
+    /// * `component_ptr` must point to a required component value that matches the given `component_id`.
+    /// * The `storage_type` must match the type associated with `component_id`.
+    /// * The `entity` and `table_row` must correspond to an entity with an uninitialized
+    ///   component matching `component_id`.
     ///
     /// This method _should not_ be called outside of [`BundleInfo::write_components`].
     /// For more information, read the [`BundleInfo::write_components`] safety docs.
@@ -336,18 +347,26 @@ impl BundleInfo {
         {
             match storage_type {
                 StorageType::Table => {
+                    // SAFETY: If component_id is in required_components, BundleInfo::new requires that
+                    // the target table contains the component.
                     let column =
-                        // SAFETY: If component_id is in required_components, BundleInfo::new requires that
-                        // the target table contains the component.
                         unsafe { table.get_column_mut(component_id).debug_checked_unwrap() };
-                    column.initialize(table_row, component_ptr, change_tick, caller);
+                    // SAFETY:
+                    // * Caller ensures `table_row` is an uninitialized component for `entity`.
+                    // * Caller ensures `component_ptr` holds a component that matches the `component_id`
+                    unsafe {
+                        column.initialize(table_row, component_ptr, change_tick, caller);
+                    }
                 }
                 StorageType::SparseSet => {
+                    // SAFETY: If component_id is in required_components, BundleInfo::new requires that
+                    // a sparse set exists for the component.
                     let sparse_set =
-                        // SAFETY: If component_id is in required_components, BundleInfo::new requires that
-                        // a sparse set exists for the component.
                         unsafe { sparse_sets.get_mut(component_id).debug_checked_unwrap() };
-                    sparse_set.insert(entity, component_ptr, change_tick, caller);
+                    // SAFETY: Caller ensures `component_ptr` holds a component that matches the `component_id`
+                    unsafe {
+                        sparse_set.insert(entity, component_ptr, change_tick, caller);
+                    }
                 }
             }
         }
@@ -491,26 +510,33 @@ impl Bundles {
     /// # Safety
     /// A [`BundleInfo`] with the given [`BundleId`] must have been initialized for this instance of `Bundles`.
     pub(crate) unsafe fn get_unchecked(&self, id: BundleId) -> &BundleInfo {
-        self.bundle_infos.get_unchecked(id.0)
+        // SAFETY: This cannot be out of bounds because the caller ensures that the BundleInfo has been initialized.
+        unsafe { self.bundle_infos.get_unchecked(id.0) }
     }
 
     /// # Safety
     /// This [`BundleId`] must have been initialized with a single [`Component`](crate::component::Component)
     /// (via [`init_component_info`](Self::init_dynamic_info))
     pub(crate) unsafe fn get_storage_unchecked(&self, id: BundleId) -> StorageType {
-        *self
-            .dynamic_component_storages
-            .get(&id)
-            .debug_checked_unwrap()
+        // SAFETY: Caller ensure that this `BundleId` has been initialized, so get cannot return `None`.
+        unsafe {
+            *self
+                .dynamic_component_storages
+                .get(&id)
+                .debug_checked_unwrap()
+        }
     }
 
     /// # Safety
     /// This [`BundleId`] must have been initialized with multiple [`Component`](crate::component::Component)s
     /// (via [`init_dynamic_info`](Self::init_dynamic_info))
     pub(crate) unsafe fn get_storages_unchecked(&mut self, id: BundleId) -> &mut Vec<StorageType> {
-        self.dynamic_bundle_storages
-            .get_mut(&id)
-            .debug_checked_unwrap()
+        // SAFETY: Caller ensures that this `BundleId` has been initialized, so `get_mut` cannot return `None`.
+        unsafe {
+            self.dynamic_bundle_storages
+                .get_mut(&id)
+                .debug_checked_unwrap()
+        }
     }
 
     /// Initializes a new [`BundleInfo`] for a dynamic [`Bundle`].
