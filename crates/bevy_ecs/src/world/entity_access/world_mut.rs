@@ -23,7 +23,7 @@ use crate::{
 
 use alloc::vec::Vec;
 use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
-use core::{any::TypeId, marker::PhantomData, mem::MaybeUninit};
+use core::{any::TypeId, iter, marker::PhantomData, mem::MaybeUninit};
 
 /// A mutable reference to a particular [`Entity`], and the entire world.
 ///
@@ -1002,19 +1002,20 @@ impl<'w> EntityWorldMut<'w> {
         );
         let storage_type = self.world.bundles.get_storage_unchecked(bundle_id);
 
-        let bundle_inserter =
+        let mut bundle_inserter =
             BundleInserter::new_with_id(self.world, location.archetype_id, bundle_id, change_tick);
 
-        self.location = Some(insert_dynamic_bundle(
-            bundle_inserter,
-            self.entity,
-            location,
-            Some(component).into_iter(),
-            Some(storage_type).iter().cloned(),
-            mode,
-            caller,
-            relationship_hook_insert_mode,
-        ));
+        // TODO: add safety comment
+        self.location = Some(unsafe {
+            bundle_inserter.insert_with_iter(
+                self.entity,
+                location,
+                iter::once((storage_type, component)),
+                mode,
+                caller,
+                relationship_hook_insert_mode,
+            )
+        });
         self.world.flush();
         self.update_location();
         self
@@ -1061,19 +1062,20 @@ impl<'w> EntityWorldMut<'w> {
         );
         let mut storage_types =
             core::mem::take(self.world.bundles.get_storages_unchecked(bundle_id));
-        let bundle_inserter =
+        let mut bundle_inserter =
             BundleInserter::new_with_id(self.world, location.archetype_id, bundle_id, change_tick);
 
-        self.location = Some(insert_dynamic_bundle(
-            bundle_inserter,
-            self.entity,
-            location,
-            iter_components,
-            (*storage_types).iter().cloned(),
-            InsertMode::Replace,
-            MaybeLocation::caller(),
-            relationship_hook_insert_mode,
-        ));
+        // TODO: add safety comment
+        self.location = Some(unsafe {
+            bundle_inserter.insert_with_iter(
+                self.entity,
+                location,
+                storage_types.clone().into_iter().zip(iter_components),
+                InsertMode::Replace,
+                MaybeLocation::caller(),
+                relationship_hook_insert_mode,
+            )
+        });
         *self.world.bundles.get_storages_unchecked(bundle_id) = core::mem::take(&mut storage_types);
         self.world.flush();
         self.update_location();
@@ -2177,72 +2179,5 @@ impl<'a> From<&'a mut EntityWorldMut<'_>> for FilteredEntityMut<'a, 'static> {
                 const { &Access::new_write_all() },
             )
         }
-    }
-}
-
-/// Inserts a dynamic [`Bundle`] into the entity.
-///
-/// # Safety
-///
-/// - [`OwningPtr`] and [`StorageType`] iterators must correspond to the
-///   [`BundleInfo`](crate::bundle::BundleInfo) used to construct [`BundleInserter`]
-/// - [`Entity`] must correspond to [`EntityLocation`]
-unsafe fn insert_dynamic_bundle<
-    'a,
-    I: Iterator<Item = OwningPtr<'a>>,
-    S: Iterator<Item = StorageType>,
->(
-    mut bundle_inserter: BundleInserter<'_>,
-    entity: Entity,
-    location: EntityLocation,
-    components: I,
-    storage_types: S,
-    mode: InsertMode,
-    caller: MaybeLocation,
-    relationship_hook_insert_mode: RelationshipHookMode,
-) -> EntityLocation {
-    struct DynamicInsertBundle<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> {
-        components: I,
-    }
-
-    impl<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> DynamicBundle
-        for DynamicInsertBundle<'a, I>
-    {
-        type Effect = ();
-        unsafe fn get_components(
-            mut ptr: MovingPtr<'_, Self>,
-            func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-        ) {
-            (&mut ptr.components).for_each(|(t, ptr)| func(t, ptr));
-        }
-
-        unsafe fn apply_effect(
-            _ptr: MovingPtr<'_, MaybeUninit<Self>>,
-            _entity: &mut EntityWorldMut,
-        ) {
-        }
-    }
-
-    let bundle = DynamicInsertBundle {
-        components: storage_types.zip(components),
-    };
-
-    move_as_ptr!(bundle);
-
-    // SAFETY:
-    // - `location` matches `entity`.  and thus must currently exist in the source
-    //   archetype for this inserter and its location within the archetype.
-    // - The caller must ensure that the iterators and storage types match up with the `BundleInserter`
-    // - `apply_effect` is never called on this bundle.
-    // - `bundle` is not used or dropped after this point.
-    unsafe {
-        bundle_inserter.insert(
-            entity,
-            location,
-            bundle,
-            mode,
-            caller,
-            relationship_hook_insert_mode,
-        )
     }
 }

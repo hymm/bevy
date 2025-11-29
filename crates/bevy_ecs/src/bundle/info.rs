@@ -310,6 +310,104 @@ impl BundleInfo {
         }
     }
 
+    /// This writes components from a given [`Bundle`] to the given entity.
+    ///
+    /// # Safety
+    ///
+    /// `bundle_component_status` must return the "correct" [`ComponentStatus`] for each component
+    /// in the [`Bundle`], with respect to the entity's original archetype (prior to the bundle being added).
+    ///
+    /// For example, if the original archetype already has `ComponentA` and `T` also has `ComponentA`, the status
+    /// should be `Existing`. If the original archetype does not have `ComponentA`, the status should be `Added`.
+    ///
+    /// When "inserting" a bundle into an existing entity, [`ArchetypeAfterBundleInsert`](crate::archetype::SpawnBundleStatus)
+    /// should be used, which will report `Added` vs `Existing` status based on the current archetype's structure.
+    ///
+    /// When spawning a bundle, [`SpawnBundleStatus`](crate::archetype::SpawnBundleStatus) can be used instead,
+    /// which removes the need to look up the [`ArchetypeAfterBundleInsert`](crate::archetype::ArchetypeAfterBundleInsert)
+    /// in the archetype graph, which requires ownership of the entity's current archetype.
+    ///
+    /// Regardless of how this is used, [`apply_effect`] must be called at most once on `bundle` after this function is
+    /// called if `T::Effect: !NoBundleEffect` before returning to user-space safe code before returning to user-space safe code.
+    /// This is currently only doable via use of [`MovingPtr::partial_move`].
+    ///
+    /// `table` must be the "new" table for `entity`. `table_row` must have space allocated for the
+    /// `entity`, `bundle` must match this [`BundleInfo`]'s type
+    ///
+    /// [`apply_effect`]: crate::bundle::DynamicBundle::apply_effect
+    #[inline]
+    pub(super) unsafe fn write_components_iter<'a, S: BundleComponentStatus>(
+        &self,
+        table: &mut Table,
+        sparse_sets: &mut SparseSets,
+        bundle_component_status: &S,
+        required_components: impl Iterator<Item = &'a RequiredComponentConstructor>,
+        components_iter: impl Iterator<Item = (StorageType, OwningPtr<'a>)>,
+        entity: Entity,
+        table_row: TableRow,
+        change_tick: Tick,
+        insert_mode: InsertMode,
+        caller: MaybeLocation,
+    ) {
+        // NOTE: get_components calls this closure on each component in "bundle order".
+        // bundle_info.component_ids are also in "bundle order"
+        for (bundle_component, (storage_type, component_ptr)) in components_iter.enumerate() {
+            let component_id = *self
+                .contributed_component_ids
+                .get_unchecked(bundle_component);
+            // SAFETY: bundle_component is a valid index for this bundle
+            let status = unsafe { bundle_component_status.get_status(bundle_component) };
+            match storage_type {
+                StorageType::Table => {
+                    let column =
+                        // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
+                        // the target table contains the component.
+                        unsafe { table.get_column_mut(component_id).debug_checked_unwrap() };
+                    match (status, insert_mode) {
+                        (ComponentStatus::Added, _) => {
+                            column.initialize(table_row, component_ptr, change_tick, caller);
+                        }
+                        (ComponentStatus::Existing, InsertMode::Replace) => {
+                            column.replace(table_row, component_ptr, change_tick, caller);
+                        }
+                        (ComponentStatus::Existing, InsertMode::Keep) => {
+                            if let Some(drop_fn) = table.get_drop_for(component_id) {
+                                drop_fn(component_ptr);
+                            }
+                        }
+                    }
+                }
+                StorageType::SparseSet => {
+                    let sparse_set =
+                        // SAFETY: If component_id is in self.component_ids, BundleInfo::new ensures that
+                        // a sparse set exists for the component.
+                        unsafe { sparse_sets.get_mut(component_id).debug_checked_unwrap() };
+                    match (status, insert_mode) {
+                        (ComponentStatus::Added, _) | (_, InsertMode::Replace) => {
+                            sparse_set.insert(entity, component_ptr, change_tick, caller);
+                        }
+                        (ComponentStatus::Existing, InsertMode::Keep) => {
+                            if let Some(drop_fn) = sparse_set.get_drop() {
+                                drop_fn(component_ptr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for required_component in required_components {
+            required_component.initialize(
+                table,
+                sparse_sets,
+                change_tick,
+                table_row,
+                entity,
+                caller,
+            );
+        }
+    }
+
     /// Internal method to initialize a required component from an [`OwningPtr`]. This should ultimately be called
     /// in the context of [`BundleInfo::write_components`], via [`RequiredComponentConstructor::initialize`].
     ///
