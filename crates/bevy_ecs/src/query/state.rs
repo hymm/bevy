@@ -142,7 +142,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     >(
         &self,
     ) -> &QueryState<NewD, NewF> {
-        &*ptr::from_ref(self).cast::<QueryState<NewD, NewF>>()
+        // SAFETY: QueryState is `repr(C)` and so has the same layout
+        unsafe { &*ptr::from_ref(self).cast::<QueryState<NewD, NewF>>() }
     }
 
     /// Returns the components accessed by this query.
@@ -1099,7 +1100,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         world: UnsafeWorldCell<'w>,
         entity: Entity,
     ) -> Result<D::Item<'w, '_>, QueryEntityError> {
-        self.query_unchecked(world).get_inner(entity)
+        // SAFETY: mutable query correctness is upheld by the caller.
+        unsafe { self.query_unchecked(world) }.get_inner(entity)
     }
 
     /// Returns an [`Iterator`] over the query results for the given [`World`].
@@ -1314,7 +1316,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: UnsafeWorldCell<'w>,
     ) -> QueryIter<'w, 's, D, F> {
-        self.query_unchecked(world).into_iter()
+        // SAFETY: Caller ensures mutable query correctness.
+        unsafe { self.query_unchecked(world) }.into_iter()
     }
 
     /// Returns an [`Iterator`] over all possible combinations of `K` query results for the
@@ -1333,7 +1336,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: UnsafeWorldCell<'w>,
     ) -> QueryCombinationIter<'w, 's, D, F, K> {
-        self.query_unchecked(world).iter_combinations_inner()
+        // SAFETY: Caller ensures mutable query correctness
+        unsafe { self.query_unchecked(world) }.iter_combinations_inner()
     }
 
     /// Returns a parallel iterator over the query results for the given [`World`].
@@ -1453,12 +1457,17 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                 scope.spawn(async move {
                     #[cfg(feature = "trace")]
                     let _span = self.par_iter_span.enter();
-                    let mut iter = self
-                        .query_unchecked_manual_with_ticks(world, last_run, this_run)
-                        .into_iter();
+                    // SAFETY: Caller ensures mutable query correctness
+                    let mut iter = unsafe {
+                        self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+                    }
+                    .into_iter();
                     let mut accum = init_accum();
                     for storage_id in queue {
-                        accum = iter.fold_over_storage_range(accum, &mut func, storage_id, None);
+                        // SAFETY: range is `None`
+                        accum = unsafe {
+                            iter.fold_over_storage_range(accum, &mut func, storage_id, None)
+                        };
                     }
                 });
             };
@@ -1474,18 +1483,26 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                         #[cfg(feature = "trace")]
                         let _span = self.par_iter_span.enter();
                         let accum = init_accum();
-                        self.query_unchecked_manual_with_ticks(world, last_run, this_run)
-                            .into_iter()
-                            .fold_over_storage_range(accum, &mut func, storage_id, Some(batch));
+                        // SAFETY: Caller ensures mutable query correctness
+                        let mut iter = unsafe {
+                            self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+                        }
+                        .into_iter();
+                        // SAFETY: `batch` was calculated above to be in bounds
+                        unsafe {
+                            iter.fold_over_storage_range(accum, &mut func, storage_id, Some(batch))
+                        };
                     });
                 }
             };
 
             let storage_entity_count = |storage_id: StorageId| -> u32 {
                 if self.is_dense {
-                    tables[storage_id.table_id].entity_count()
+                    // SAFETY: union type is determined by `self.is_dense`
+                    tables[unsafe { storage_id.table_id }].entity_count()
                 } else {
-                    archetypes[storage_id.archetype_id].len()
+                    // SAFETY: union type is determined by `self.is_dense`
+                    archetypes[unsafe { storage_id.archetype_id }].len()
                 }
             };
 
@@ -1561,7 +1578,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
                     #[cfg(feature = "trace")]
                     let _span = self.par_iter_span.enter();
                     let accum = init_accum();
-                    self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+                    // SAFETY: Caller ensures mutable query correctness
+                    unsafe { self.query_unchecked_manual_with_ticks(world, last_run, this_run) }
                         .iter_many_unique_inner(batch)
                         .fold(accum, &mut func);
                 });
@@ -1570,7 +1588,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             #[cfg(feature = "trace")]
             let _span = self.par_iter_span.enter();
             let accum = init_accum();
-            self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+            // SAFETY: Caller ensures mutable query correctness
+            unsafe { self.query_unchecked_manual_with_ticks(world, last_run, this_run) }
                 .iter_many_unique_inner(remainder)
                 .fold(accum, &mut func);
         });
@@ -1624,7 +1643,8 @@ impl<D: ReadOnlyQueryData, F: QueryFilter> QueryState<D, F> {
                     #[cfg(feature = "trace")]
                     let _span = self.par_iter_span.enter();
                     let accum = init_accum();
-                    self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+                    // SAFETY: Caller ensures mutable query correctness
+                    unsafe { self.query_unchecked_manual_with_ticks(world, last_run, this_run) }
                         .iter_many_inner(batch)
                         .fold(accum, &mut func);
                 });
@@ -1633,7 +1653,8 @@ impl<D: ReadOnlyQueryData, F: QueryFilter> QueryState<D, F> {
             #[cfg(feature = "trace")]
             let _span = self.par_iter_span.enter();
             let accum = init_accum();
-            self.query_unchecked_manual_with_ticks(world, last_run, this_run)
+            // SAFETY: Caller ensures mutable query correctness
+            unsafe { self.query_unchecked_manual_with_ticks(world, last_run, this_run) }
                 .iter_many_inner(remainder)
                 .fold(accum, &mut func);
         });
@@ -1755,7 +1776,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &mut self,
         world: UnsafeWorldCell<'w>,
     ) -> Result<D::Item<'w, '_>, QuerySingleError> {
-        self.query_unchecked(world).single_inner()
+        // SAFETY: Caller ensures mutable query correctness
+        unsafe { self.query_unchecked(world) }.single_inner()
     }
 
     /// Returns a query result when there is exactly one entity matching the query,
@@ -1780,8 +1802,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // SAFETY:
         // - The caller ensured we have the correct access to the world.
         // - The caller ensured that the world matches.
-        self.query_unchecked_manual_with_ticks(world, last_run, this_run)
-            .single_inner()
+        unsafe { self.query_unchecked_manual_with_ticks(world, last_run, this_run) }.single_inner()
     }
 }
 
