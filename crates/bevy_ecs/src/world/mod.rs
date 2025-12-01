@@ -1,4 +1,20 @@
 //! Defines the [`World`] and APIs for accessing it directly.
+//!
+//! # Structural Change to World
+//!
+//! Moving entities between archetypes, Modifinng the world metadata are structural changes.
+//! Non structural changea are mutating existng resource or components. You are only allowed
+//! to make structural changes to a world of you own it or have a mutable reference to it.
+//! Other references to world have to queue changes to the world through commands which are
+//! can be applied when there is &mut World access.
+//!
+//! # Permissions of a `UnsafeWorldCell`
+//!
+//! There are multiple unsafe methods on `UnsafeWorldCell` that reference the `UnsafeWorldCell`
+//! having permissions. The permissions of a `UnsafeWorldCell` come from the reference that
+//! it is created from. So for a `&World`
+//! you are only allowed to access component mutably. While if it was created from an
+//! `&mut World` or `DeferredWorld` reference you can use it to mutate resources and components.
 
 pub(crate) mod command_queue;
 mod deferred_world;
