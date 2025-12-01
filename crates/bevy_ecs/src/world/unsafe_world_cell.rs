@@ -697,7 +697,8 @@ impl<'w> UnsafeWorldCell<'w> {
     /// Must have read access to [`DefaultErrorHandler`].
     #[inline]
     pub unsafe fn default_error_handler(&self) -> ErrorHandler {
-        self.get_resource::<DefaultErrorHandler>()
+        // SAFETY: Caller ensures that read access is allowed.
+        unsafe { self.get_resource::<DefaultErrorHandler>() }
             .copied()
             .unwrap_or_default()
             .0
@@ -1252,22 +1253,27 @@ unsafe fn get_component_and_ticks(
             let table = unsafe { world.fetch_table(location)? };
 
             // SAFETY: archetypes only store valid table_rows and caller ensure aliasing rules
-            Some((
-                table.get_component(component_id, location.table_row)?,
-                ComponentTickCells {
-                    added: table
-                        .get_added_tick(component_id, location.table_row)
-                        .debug_checked_unwrap(),
-                    changed: table
-                        .get_changed_tick(component_id, location.table_row)
-                        .debug_checked_unwrap(),
-                    changed_by: table
-                        .get_changed_by(component_id, location.table_row)
-                        .map(|changed_by| changed_by.debug_checked_unwrap()),
-                },
-            ))
+            unsafe {
+                Some((
+                    table.get_component(component_id, location.table_row)?,
+                    ComponentTickCells {
+                        added: table
+                            .get_added_tick(component_id, location.table_row)
+                            .debug_checked_unwrap(),
+                        changed: table
+                            .get_changed_tick(component_id, location.table_row)
+                            .debug_checked_unwrap(),
+                        changed_by: table
+                            .get_changed_by(component_id, location.table_row)
+                            .map(|changed_by| changed_by.debug_checked_unwrap()),
+                    },
+                ))
+            }
         }
-        StorageType::SparseSet => world.fetch_sparse_set(component_id)?.get_with_ticks(entity),
+        StorageType::SparseSet => {
+            // SAFETY: archetypes only store valid table_rows and caller ensure aliasing rules
+            unsafe { world.fetch_sparse_set(component_id)? }.get_with_ticks(entity)
+        }
     }
 }
 
