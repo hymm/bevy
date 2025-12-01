@@ -1215,11 +1215,17 @@ unsafe fn get_component(
     // SAFETY: component_id exists and is therefore valid
     match storage_type {
         StorageType::Table => {
-            let table = world.fetch_table(location)?;
+            // SAFETY:
+            // * Caller ensures that no aliasing rules are violated.
+            // * Caller ensures that UnsafeWorldCell has permissions to access the component
+            let table = unsafe { world.fetch_table(location)? };
             // SAFETY: archetypes only store valid table_rows and caller ensure aliasing rules
-            table.get_component(component_id, location.table_row)
+            unsafe { table.get_component(component_id, location.table_row) }
         }
-        StorageType::SparseSet => world.fetch_sparse_set(component_id)?.get(entity),
+        StorageType::SparseSet => {
+            // SAFETY: Caller ensures aliasing rules are followed.
+            unsafe { world.fetch_sparse_set(component_id)? }.get(entity)
+        }
     }
 }
 
@@ -1240,7 +1246,10 @@ unsafe fn get_component_and_ticks(
 ) -> Option<(Ptr<'_>, ComponentTickCells<'_>)> {
     match storage_type {
         StorageType::Table => {
-            let table = world.fetch_table(location)?;
+            // SAFETY:
+            // * Caller ensures that no aliasing rules are violated.
+            // * Caller ensures that UnsafeWorldCell has permissions to access the component
+            let table = unsafe { world.fetch_table(location)? };
 
             // SAFETY: archetypes only store valid table_rows and caller ensure aliasing rules
             Some((
@@ -1280,11 +1289,21 @@ unsafe fn get_ticks(
 ) -> Option<ComponentTicks> {
     match storage_type {
         StorageType::Table => {
-            let table = world.fetch_table(location)?;
-            // SAFETY: archetypes only store valid table_rows and caller ensure aliasing rules
-            table.get_ticks_unchecked(component_id, location.table_row)
+            // SAFETY:
+            // * Caller ensures that no aliasing rules are violated.
+            // * UnsafeWorldCell always has permissions to read change ticks
+            let table = unsafe { world.fetch_table(location)? };
+            // SAFETY:
+            // * archetypes only store valid table_rows
+            // * Caller ensure that no aliasing rules are violated.
+            unsafe { table.get_ticks_unchecked(component_id, location.table_row) }
         }
-        StorageType::SparseSet => world.fetch_sparse_set(component_id)?.get_ticks(entity),
+        StorageType::SparseSet => {
+            // SAFETY:
+            // * UnsafeWorldCell always has permissions to read change ticks
+            // * Caller ensure that no aliasing rules are violated.
+            unsafe { world.fetch_sparse_set(component_id)? }.get_ticks(entity)
+        }
     }
 }
 
