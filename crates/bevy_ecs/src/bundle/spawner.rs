@@ -42,29 +42,41 @@ impl<'w> BundleSpawner<'w> {
         bundle_id: BundleId,
         change_tick: Tick,
     ) -> Self {
-        let bundle_info = world.bundles.get_unchecked(bundle_id);
-        let (new_archetype_id, is_new_created) = bundle_info.insert_bundle_into_archetype(
-            &mut world.archetypes,
-            &mut world.storages,
-            &world.components,
-            &world.observers,
-            ArchetypeId::EMPTY,
-        );
+        let (is_new_created, new_archetype_id, spawner) = {
+            // We perform these actions in a block to make it clear that any references to world are
+            // dropped before converting the `world` reference into a `DeferredWorld`
 
-        let archetype = &mut world.archetypes[new_archetype_id];
-        let table = &mut world.storages.tables[archetype.table_id()];
-        let spawner = Self {
-            bundle_info: bundle_info.into(),
-            table: table.into(),
-            archetype: archetype.into(),
-            change_tick,
-            world: world.as_unsafe_world_cell(),
+            // SAFETY: Caller ensures `bundle_id` exists
+            let bundle_info = unsafe { world.bundles.get_unchecked(bundle_id) };
+            // SAFETY: Caller ensures that `bundle_id` exists in this world, so it uses the same instance of `Components`
+            let (new_archetype_id, is_new_created) = unsafe {
+                bundle_info.insert_bundle_into_archetype(
+                    &mut world.archetypes,
+                    &mut world.storages,
+                    &world.components,
+                    &world.observers,
+                    ArchetypeId::EMPTY,
+                )
+            };
+
+            let archetype = &mut world.archetypes[new_archetype_id];
+            let table = &mut world.storages.tables[archetype.table_id()];
+            (
+                is_new_created,
+                new_archetype_id,
+                Self {
+                    bundle_info: bundle_info.into(),
+                    table: table.into(),
+                    archetype: archetype.into(),
+                    change_tick,
+                    world: world.as_unsafe_world_cell(),
+                },
+            )
         };
         if is_new_created {
-            spawner
-                .world
-                .into_deferred()
-                .trigger(ArchetypeCreated(new_archetype_id));
+            // SAFETY: There are no active references to the world as we have an exclusive reference to world and we dropped any
+            // references to world in the above block.
+            unsafe { spawner.world.into_deferred() }.trigger(ArchetypeCreated(new_archetype_id));
         }
         spawner
     }
@@ -94,40 +106,57 @@ impl<'w> BundleSpawner<'w> {
         bundle: MovingPtr<'_, T>,
         caller: MaybeLocation,
     ) -> EntityLocation {
-        // SAFETY: We do not make any structural changes to the archetype graph through self.world so these pointers always remain valid
-        let bundle_info = self.bundle_info.as_ref();
+        // SAFETY: We do not make any structural changes to the archetype graph through `self.world` so these pointers always remain valid
+        let bundle_info = unsafe { self.bundle_info.as_ref() };
         let location = {
-            let table = self.table.as_mut();
-            let archetype = self.archetype.as_mut();
+            // SAFETY:
+            // * The pointers are dereferencable because they were created from a reference in `Self::new_with_id`.
+            // * `Self` was created from an exclusive reference to world and  `Self` does not make structural
+            // changes to the world, so the data is valid for the lifetime of `Self`
+            let (table, archetype) = unsafe { (self.table.as_mut(), self.archetype.as_mut()) };
 
-            // SAFETY: Mutable references do not alias and will be dropped after this block
             let (sparse_sets, entities) = {
-                let world = self.world.world_mut();
+                // We place &mut World in this block to discourage the use later.
+                // SAFETY: Mutable references do not alias and will be dropped after this block
+                let world = unsafe { self.world.world_mut() };
                 (&mut world.storages.sparse_sets, &mut world.entities)
             };
-            let table_row = table.allocate(entity);
-            let location = archetype.allocate(entity, table_row);
-            bundle_info.write_components(
-                table,
-                sparse_sets,
-                &SpawnBundleStatus,
-                bundle_info.required_component_constructors.iter(),
-                entity,
-                table_row,
-                self.change_tick,
-                bundle,
-                InsertMode::Replace,
-                caller,
-            );
-            entities.set_location(entity.index(), Some(location));
-            entities.mark_spawned_or_despawned(entity.index(), caller, self.change_tick);
+            // SAFETY: The allocated entity is written to below with `bundle_info.write_components`
+            let table_row = unsafe { table.allocate(entity) };
+            // SAFETY: The allocated entity is written to below with `bundle_info.write_components`
+            let location = unsafe { archetype.allocate(entity, table_row) };
+            // SAFETY:
+            // * ComponentStatus is hard coded to `SpawnBundleStatus` and so it correct.
+            // * Caller has ensured that [`apply_effect`] will be called at most once.
+            // * `table_row` and `location` were allocated above, so are valid.
+            // * Caller has ensured that `bundle` matches the type of `Self::bundle_info`
+            unsafe {
+                bundle_info.write_components(
+                    table,
+                    sparse_sets,
+                    &SpawnBundleStatus,
+                    bundle_info.required_component_constructors.iter(),
+                    entity,
+                    table_row,
+                    self.change_tick,
+                    bundle,
+                    InsertMode::Replace,
+                    caller,
+                );
+            }
+            // SAFETY: `location` was allocated and written to above and so is valid
+            unsafe { entities.set_location(entity.index(), Some(location)) };
+            // SAFETY: `index` was spawned in above code and is valid.
+            unsafe { entities.mark_spawned_or_despawned(entity.index(), caller, self.change_tick) };
             location
         };
 
-        // SAFETY: We have no outstanding mutable references to world as they were dropped
+        // SAFETY: We have no outstanding mutable references to world as they were dropped in the block above.
         let mut deferred_world = unsafe { self.world.into_deferred() };
-        // SAFETY: `DeferredWorld` cannot provide mutable access to `Archetypes`.
-        let archetype = self.archetype.as_ref();
+        // SAFETY:
+        // * Pointer is `dereferencable` because we created it from a reference in `Self::new_with_id`.
+        // * `DeferredWorld` cannot provide mutable access to `Archetypes`, so it is safe to hold a reference to an archetype
+        let archetype = unsafe { self.archetype.as_ref() };
         // SAFETY: All components in the bundle are guaranteed to exist in the World
         // as they must be initialized before creating the BundleInfo.
         unsafe {
@@ -201,7 +230,7 @@ impl<'w> BundleSpawner<'w> {
     /// - `Self` must be dropped after running this function as it may invalidate internal pointers.
     #[inline]
     pub(crate) unsafe fn flush_commands(&mut self) {
-        // SAFETY: pointers on self can be invalidated,
-        self.world.world_mut().flush();
+        // SAFETY: pointers on self can be invalidated since they will be dropped after this method is called.
+        unsafe { self.world.world_mut() }.flush();
     }
 }
