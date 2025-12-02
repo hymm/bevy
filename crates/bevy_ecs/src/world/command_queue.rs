@@ -235,12 +235,11 @@ impl RawCommandQueue {
     pub(crate) unsafe fn apply_or_drop_queued(&mut self, world: Option<NonNull<World>>) {
         // SAFETY: If this is the command queue on world, world will not be dropped as we have a mutable reference
         // If this is not the command queue on world we have exclusive ownership and self will not be mutated
-        let start = *self.cursor.as_ref();
-        let stop = self.bytes.as_ref().len();
+        let (start, stop) = unsafe { (*self.cursor.as_ref(), self.bytes.as_ref().len()) };
         let mut local_cursor = start;
         // SAFETY: we are setting the global cursor to the current length to prevent the executing commands from applying
         // the remaining commands currently in this list. This is safe.
-        *self.cursor.as_mut() = stop;
+        unsafe { *self.cursor.as_mut() = stop };
 
         while local_cursor < stop {
             // SAFETY: The cursor is either at the start of the buffer, or just after the previous command.
@@ -289,12 +288,17 @@ impl RawCommandQueue {
                     //
                     // This is implemented in such a way that if apply_or_drop_queued() are nested recursively in,
                     // an applied Command, the correct command order will be retained.
-                    let panic_recovery = self.panic_recovery.as_mut();
-                    let bytes = self.bytes.as_mut();
+                    // SAFETY: If this is the command queue on world, world will not be dropped as we have a mutable reference
+                    // If this is not the command queue on world we have exclusive ownership and self will not be mutated
+                    let (panic_recovery, bytes) =
+                        unsafe { (self.panic_recovery.as_mut(), self.bytes.as_mut()) };
                     let current_stop = bytes.len();
                     panic_recovery.extend_from_slice(&bytes[local_cursor..current_stop]);
-                    bytes.set_len(start);
-                    *self.cursor.as_mut() = start;
+                    // SAFETY: `start` was set with a valid index above.
+                    unsafe { bytes.set_len(start) };
+                    // SAFETY: If this is the command queue on world, world will not be dropped as we have a mutable reference
+                    // If this is not the command queue on world we have exclusive ownership and self will not be mutated
+                    unsafe { *self.cursor.as_mut() = start };
 
                     // This was the "top of the apply stack". If we are _not_ at the top of the apply stack,
                     // when we call`resume_unwind" the caller "closer to the top" will catch the unwind and do this check,
@@ -316,7 +320,7 @@ impl RawCommandQueue {
         unsafe {
             self.bytes.as_mut().set_len(start);
             *self.cursor.as_mut() = start;
-        };
+        }
     }
 }
 
