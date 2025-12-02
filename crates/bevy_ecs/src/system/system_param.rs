@@ -2148,9 +2148,17 @@ macro_rules! impl_system_param_tuple {
                 world: UnsafeWorldCell,
             ) -> Result<(), SystemParamValidationError> {
                 let ($($param,)*) = state;
-                $(
-                    $param::validate_param($param, system_meta, world)?;
-                )*
+
+                #[allow(
+                    unused_unsafe,
+                    reason = "Zero-length tuples won't have any params to validate."
+                )]
+                // SAFETY: Upheld by caller
+                unsafe {
+                    $(
+                        $param::validate_param($param, system_meta, world)?;
+                    )*
+                }
                 Ok(())
             }
 
@@ -2162,11 +2170,19 @@ macro_rules! impl_system_param_tuple {
                 change_tick: Tick,
             ) -> Self::Item<'w, 's> {
                 let ($($param,)*) = state;
+
                 #[allow(
-                    clippy::unused_unit,
-                    reason = "Zero-length tuples won't have any params to get."
+                    unused_unsafe,
+                    reason = "Zero-length tuples won't have any params to validate."
                 )]
-                ($($param::get_param($param, system_meta, world, change_tick),)*)
+                // SAFETY: Upheld by caller
+                unsafe {
+                    #[allow(
+                        clippy::unused_unit,
+                        reason = "Zero-length tuples won't have any params to get."
+                    )]
+                    ($($param::get_param($param, system_meta, world, change_tick),)*)
+                }
             }
         }
     };
