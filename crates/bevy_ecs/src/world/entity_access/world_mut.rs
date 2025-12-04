@@ -2202,19 +2202,24 @@ unsafe fn insert_dynamic_bundle<
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
-    struct DynamicInsertBundle<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> {
+    struct DynamicInsertBundle<I>
+    where
+        I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
+    {
         components: I,
     }
 
-    impl<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> DynamicBundle
-        for DynamicInsertBundle<'a, I>
+    impl<I> DynamicBundle for DynamicInsertBundle<I>
+    where
+        I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
     {
         type Effect = ();
-        unsafe fn get_components(
-            ptr: MovingPtr<'_, Self>,
-        ) -> impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>
+        unsafe fn get_components<'b>(
+            ptr: MovingPtr<'b, Self>,
+        ) -> impl Lender + use<'b> + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>
         {
-            lender::lend_iter(ptr.components)
+            // TODO: I need return a struct that will take ownership of the MovingPtr
+            ptr.components
         }
 
         unsafe fn apply_effect(
@@ -2225,7 +2230,9 @@ unsafe fn insert_dynamic_bundle<
     }
 
     let bundle = DynamicInsertBundle {
-        components: storage_types.zip(components),
+        components: lender::lend_iter::<'_, lender::lend!((StorageType, OwningPtr<'lend>)), _>(
+            storage_types.zip(components),
+        ),
     };
 
     move_as_ptr!(bundle);
