@@ -2,6 +2,7 @@ use core::{any::TypeId, iter};
 
 use bevy_ptr::{MovingPtr, OwningPtr};
 use core::mem::MaybeUninit;
+use lender::{lend, Lender, Lending};
 use variadics_please::all_tuples_enumerated;
 
 use crate::{
@@ -45,9 +46,11 @@ impl<C: Component> DynamicBundle for C {
     #[inline]
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-    ) -> Self::Effect {
-        func(C::STORAGE_TYPE, OwningPtr::from(ptr));
+    ) -> impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)> {
+        lender::once::<lend!((StorageType, OwningPtr<'lend>))>((
+            C::STORAGE_TYPE,
+            OwningPtr::from(ptr),
+        ))
     }
 
     #[inline]
@@ -134,12 +137,14 @@ macro_rules! tuple_impl {
                 reason = "Zero-length tuples will generate a function body equivalent to `()`; however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."
             )]
             #[inline(always)]
-            unsafe fn get_components(ptr: MovingPtr<'_, Self>, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) {
+            unsafe fn get_components(
+                ptr: MovingPtr<'_, Self>
+            ) -> impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)> {
                 bevy_ptr::deconstruct_moving_ptr!({
                     let tuple { $($index: $alias,)* } = ptr;
                 });
                 // SAFETY: Caller ensures requirements for calling `get_components` are met.
-                $( $name::get_components($alias, func); )*
+                lender::empty::<lend!((StorageType, OwningPtr<'lend>))>() $( .chain($name::get_components($alias)) )*
             }
 
             #[allow(

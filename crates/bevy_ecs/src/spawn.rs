@@ -14,6 +14,7 @@ use core::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
 };
+use lender::{Lender, Lending};
 use variadics_please::all_tuples_enumerated;
 
 /// A wrapper over a [`Bundle`] indicating that an entity should be spawned with that [`Bundle`].
@@ -316,8 +317,11 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
 
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
-    ) {
+    ) -> impl Lender
+           + for<'lend> Lending<
+        'lend,
+        Lend = (crate::component::StorageType, bevy_ptr::OwningPtr<'lend>),
+    > {
         let target =
             <R::RelationshipTarget as RelationshipTarget>::with_capacity(ptr.list.size_hint());
         move_as_ptr!(target);
@@ -327,7 +331,7 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
         //   called exactly once for each component being fetched with the correct `StorageType`
         // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
         //   at least once before returning to safe code.
-        <R::RelationshipTarget as DynamicBundle>::get_components(target, func);
+        <R::RelationshipTarget as DynamicBundle>::get_components(target);
         // Forget the pointer so that the value is available in `apply_effect`.
         mem::forget(ptr);
     }
@@ -362,8 +366,11 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
 
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
-    ) {
+    ) -> impl Lender
+           + for<'lend> Lending<
+        'lend,
+        Lend = (crate::component::StorageType, bevy_ptr::OwningPtr<'lend>),
+    > {
         let target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
         move_as_ptr!(target);
         // SAFETY:
@@ -372,7 +379,7 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
         //   called exactly once for each component being fetched with the correct `StorageType`
         // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
         //   at least once before returning to safe code.
-        <R::RelationshipTarget as DynamicBundle>::get_components(target, func);
+        <R::RelationshipTarget as DynamicBundle>::get_components(target);
         // Forget the pointer so that the value is available in `apply_effect`.
         mem::forget(ptr);
     }

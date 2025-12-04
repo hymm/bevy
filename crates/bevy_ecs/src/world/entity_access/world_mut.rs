@@ -24,6 +24,7 @@ use crate::{
 use alloc::vec::Vec;
 use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
 use core::{any::TypeId, marker::PhantomData, mem::MaybeUninit};
+use lender::{Lender, Lending};
 
 /// A mutable reference to a particular [`Entity`], and the entire world.
 ///
@@ -2210,10 +2211,10 @@ unsafe fn insert_dynamic_bundle<
     {
         type Effect = ();
         unsafe fn get_components(
-            mut ptr: MovingPtr<'_, Self>,
-            func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-        ) {
-            (&mut ptr.components).for_each(|(t, ptr)| func(t, ptr));
+            ptr: MovingPtr<'_, Self>,
+        ) -> impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>
+        {
+            lender::lend_iter(ptr.components)
         }
 
         unsafe fn apply_effect(
