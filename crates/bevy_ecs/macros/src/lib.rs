@@ -157,6 +157,7 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
                 ptr: #ecs_path::ptr::MovingPtr<'_, Self>,
             ) -> impl lender::Lender + for<'lend> lender::Lending<'lend, Lend = (#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'lend>)> {
                 use #ecs_path::__macro_exports::DebugCheckedUnwrap;
+                use lender::Lender;
 
                 #ecs_path::ptr::deconstruct_moving_ptr!({
                     let #struct_name { #(#active_field_members: #active_field_locals,)* #(#inactive_field_members: _,)* } = ptr;
