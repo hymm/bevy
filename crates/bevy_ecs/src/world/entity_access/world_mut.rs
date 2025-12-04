@@ -26,7 +26,12 @@ use crate::{
 
 use alloc::vec::Vec;
 use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
-use core::{any::TypeId, marker::PhantomData, mem::MaybeUninit};
+use core::{
+    any::TypeId,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+};
+use lender_dyn::{Lend, LendingIterator};
 
 /// A mutable reference to a particular [`Entity`], and the entire world.
 ///
@@ -2299,19 +2304,41 @@ unsafe fn insert_dynamic_bundle<
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
-    struct DynamicInsertBundle<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> {
+    struct DynamicInsertBundlePtr<
+        'a,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+    >(MovingPtr<'a, DynamicInsertBundle<I>>);
+
+    impl<'a, I> LendingIterator for DynamicInsertBundlePtr<'a, I>
+    where
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+    {
+        type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>;
+
+        fn next(&mut self) -> Option<(StorageType, OwningPtr<'a>)> {
+            // TODO: try to understand this safety better
+            // SAFETY: 'a is garunteed to live for 'self, since it's external to Self
+            unsafe { mem::transmute(self.0.components.next()) }
+        }
+    }
+
+    struct DynamicInsertBundle<I>
+    where
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+    {
         components: I,
     }
 
-    impl<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> DynamicBundle
-        for DynamicInsertBundle<'a, I>
+    impl<I> DynamicBundle for DynamicInsertBundle<I>
+    where
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
     {
         type Effect = ();
         unsafe fn get_components(
-            mut ptr: MovingPtr<'_, Self>,
-            func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-        ) {
-            (&mut ptr.components).for_each(|(t, ptr)| func(t, ptr));
+            ptr: MovingPtr<'_, Self>,
+        ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>
+        {
+            DynamicInsertBundlePtr(ptr)
         }
 
         unsafe fn apply_effect(
@@ -2322,7 +2349,7 @@ unsafe fn insert_dynamic_bundle<
     }
 
     let bundle = DynamicInsertBundle {
-        components: storage_types.zip(components),
+        components: lender_dyn::from_iter(storage_types.zip(components)),
     };
 
     move_as_ptr!(bundle);

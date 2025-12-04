@@ -11,6 +11,7 @@ mod spawner;
 mod tests;
 
 pub(crate) use insert::BundleInserter;
+use lender_dyn::{Lend, LendingIterator};
 pub(crate) use remove::BundleRemover;
 pub(crate) use spawner::BundleSpawner;
 
@@ -264,8 +265,7 @@ pub trait DynamicBundle: Sized {
     // information.
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-    );
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>;
 
     /// Applies the after-effects of spawning this bundle.
     ///

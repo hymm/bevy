@@ -4,16 +4,19 @@
 use crate::{
     bundle::{Bundle, DynamicBundle, InsertMode, NoBundleEffect},
     change_detection::MaybeLocation,
+    component::StorageType,
     entity::Entity,
     relationship::{RelatedSpawner, Relationship, RelationshipHookMode, RelationshipTarget},
     world::{EntityWorldMut, World},
 };
 use alloc::vec::Vec;
-use bevy_ptr::{move_as_ptr, MovingPtr};
+use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
 use core::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
+    ptr::NonNull,
 };
+use lender_dyn::{Lend, LendingIterator};
 use variadics_please::all_tuples_enumerated;
 
 /// A wrapper over a [`Bundle`] indicating that an entity should be spawned with that [`Bundle`].
@@ -284,6 +287,32 @@ all_tuples_enumerated!(
     field_
 );
 
+/// Struct that implements lending iterator that owns the memory for a single component.
+// TODO: clean up the memory?
+struct ComponentMaybeUninit<'a, C: crate::component::Component> {
+    uninit_c: MaybeUninit<C>,
+    yielded: bool,
+    marker: PhantomData<&'a C>,
+}
+impl<'a, C: crate::component::Component> LendingIterator for ComponentMaybeUninit<'a, C> {
+    type Lend = dyn for<'this> Lend<'this, Item = (StorageType, OwningPtr<'a>)>;
+
+    fn next(&mut self) -> Option<(StorageType, OwningPtr<'a>)> {
+        if self.yielded {
+            None
+        } else {
+            self.yielded = true;
+            let inner = NonNull::from_mut(&mut self.uninit_c);
+            // SAFETY:
+            // * the valid is valid since it was constructed from concrete C with `Self::new` and cannot be invalidated if yielded is `false`.
+            // * The OwningPtr's lifetime is linked to &mut self so cannot outlive the value stored in self
+            Some((C::STORAGE_TYPE, unsafe {
+                OwningPtr::new(inner.cast::<u8>())
+            }))
+        }
+    }
+}
+
 /// A [`Bundle`] that:
 /// 1. Contains a [`RelationshipTarget`] component (associated with the given [`Relationship`]). This reserves space for the [`SpawnableList`].
 /// 2. Spawns a [`SpawnableList`] of related entities with a given [`Relationship`].
@@ -316,20 +345,17 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
 
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
-    ) {
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>
+    {
         let target =
             <R::RelationshipTarget as RelationshipTarget>::with_capacity(ptr.list.size_hint());
-        move_as_ptr!(target);
-        // SAFETY:
-        // - The caller must ensure that this is called exactly once before `apply_effect`.
-        // - Assuming `DynamicBundle` is implemented correctly for `R::Relationship` target, `func` should be
-        //   called exactly once for each component being fetched with the correct `StorageType`
-        // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
-        //   at least once before returning to safe code.
-        unsafe { <R::RelationshipTarget as DynamicBundle>::get_components(target, func) };
         // Forget the pointer so that the value is available in `apply_effect`.
         mem::forget(ptr);
+        ComponentMaybeUninit {
+            uninit_c: MaybeUninit::new(target),
+            yielded: false,
+            marker: PhantomData,
+        }
     }
 
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {
@@ -362,19 +388,16 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
 
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
-    ) {
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>
+    {
         let target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
-        move_as_ptr!(target);
-        // SAFETY:
-        // - The caller must ensure that this is called exactly once before `apply_effect`.
-        // - Assuming `DynamicBundle` is implemented correctly for `R::Relationship` target, `func` should be
-        //   called exactly once for each component being fetched with the correct `StorageType`
-        // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
-        //   at least once before returning to safe code.
-        unsafe { <R::RelationshipTarget as DynamicBundle>::get_components(target, func) };
         // Forget the pointer so that the value is available in `apply_effect`.
         mem::forget(ptr);
+        ComponentMaybeUninit {
+            uninit_c: MaybeUninit::new(target),
+            yielded: false,
+            marker: PhantomData,
+        }
     }
 
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {

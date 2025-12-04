@@ -2,6 +2,7 @@ use core::{any::TypeId, iter};
 
 use bevy_ptr::{MovingPtr, OwningPtr};
 use core::mem::MaybeUninit;
+use lender_dyn::{Lend, LendingIterator};
 use variadics_please::all_tuples_enumerated;
 
 use crate::{
@@ -45,9 +46,9 @@ impl<C: Component> DynamicBundle for C {
     #[inline]
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
-        func: &mut impl FnMut(StorageType, OwningPtr<'_>),
-    ) -> Self::Effect {
-        func(C::STORAGE_TYPE, OwningPtr::from(ptr));
+    ) -> impl LendingIterator<Lend = dyn for<'a> Lend<'a, Item = (StorageType, OwningPtr<'_>)>>
+    {
+        lender_dyn::once::once((C::STORAGE_TYPE, OwningPtr::from(ptr)))
     }
 
     #[inline]
@@ -134,7 +135,9 @@ macro_rules! tuple_impl {
                 reason = "Zero-length tuples will generate a function body equivalent to `()`; however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."
             )]
             #[inline(always)]
-            unsafe fn get_components(ptr: MovingPtr<'_, Self>, func: &mut impl FnMut(StorageType, OwningPtr<'_>)) {
+            unsafe fn get_components(
+                ptr: MovingPtr<'_, Self>
+            ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>> {
                 bevy_ptr::deconstruct_moving_ptr!({
                     let tuple { $($index: $alias,)* } = ptr;
                 });
@@ -143,9 +146,7 @@ macro_rules! tuple_impl {
                     reason = "Zero-length tuples will generate a function body equivalatent to (); however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."
                 )]
                 // SAFETY: Caller ensures requirements for calling `get_components` are met.
-                unsafe {
-                    $( $name::get_components($alias, func); )*
-                }
+                lender_dyn::empty::empty() $( .chain($name::get_components($alias)) )*
             }
 
             #[allow(

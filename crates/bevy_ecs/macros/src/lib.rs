@@ -155,18 +155,19 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
             #[inline]
             unsafe fn get_components(
                 ptr: #ecs_path::ptr::MovingPtr<'_, Self>,
-                func: &mut impl FnMut(#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'_>)
-            ) {
+            ) -> impl #ecs_path::lender_dyn::LendingIterator<Lend = dyn for<'a> #ecs_path::lender_dyn::Lend<'a, Item = (#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'_>)>> {
                 use #ecs_path::__macro_exports::DebugCheckedUnwrap;
+                use #ecs_path::lender_dyn::LendingIterator;
 
                 #ecs_path::ptr::deconstruct_moving_ptr!({
                     let #struct_name { #(#active_field_members: #active_field_locals,)* #(#inactive_field_members: _,)* } = ptr;
                 });
+
+                #ecs_path::lender_dyn::empty::empty()
                 #(
-                    <#active_field_types as #ecs_path::bundle::DynamicBundle>::get_components(
-                        #active_field_locals,
-                        func
-                    );
+                    .chain(<#active_field_types as #ecs_path::bundle::DynamicBundle>::get_components(
+                        #active_field_locals
+                    ))
                 )*
             }
 
