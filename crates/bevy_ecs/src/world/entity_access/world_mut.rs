@@ -2202,6 +2202,28 @@ unsafe fn insert_dynamic_bundle<
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
+    struct DynamicInsertBundlePtr<
+        'a,
+        I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
+    >(MovingPtr<'a, DynamicInsertBundle<I>>);
+    impl<
+            'this,
+            'lend,
+            I: Lender
+                + for<'inner_lend> Lending<'inner_lend, Lend = (StorageType, OwningPtr<'inner_lend>)>,
+        > Lending<'lend> for DynamicInsertBundlePtr<'this, I>
+    {
+        type Lend = (StorageType, OwningPtr<'lend>);
+    }
+    impl<'this, I> Lender for DynamicInsertBundlePtr<'this, I>
+    where
+        I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
+    {
+        fn next(&mut self) -> Option<(StorageType, OwningPtr<'_>)> {
+            self.0.components.next()
+        }
+    }
+
     struct DynamicInsertBundle<I>
     where
         I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
@@ -2214,12 +2236,11 @@ unsafe fn insert_dynamic_bundle<
         I: Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
     {
         type Effect = ();
-        unsafe fn get_components<'b>(
-            ptr: MovingPtr<'b, Self>,
-        ) -> impl Lender + use<'b> + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>
+        unsafe fn get_components(
+            ptr: MovingPtr<'_, Self>,
+        ) -> impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>
         {
-            // TODO: I need return a struct that will take ownership of the MovingPtr
-            ptr.components
+            DynamicInsertBundlePtr(ptr)
         }
 
         unsafe fn apply_effect(
