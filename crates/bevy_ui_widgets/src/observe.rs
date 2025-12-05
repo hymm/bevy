@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 use bevy_ecs::{
     bundle::{Bundle, DynamicBundle},
     event::EntityEvent,
+    lender::Lender,
     system::IntoObserverSystem,
 };
 
@@ -49,9 +50,21 @@ impl<E: EntityEvent, B: Bundle, M, I: IntoObserverSystem<E, B, M>> DynamicBundle
     #[inline]
     unsafe fn get_components(
         _ptr: bevy_ecs::ptr::MovingPtr<'_, Self>,
-        _func: &mut impl FnMut(bevy_ecs::component::StorageType, bevy_ecs::ptr::OwningPtr<'_>),
-    ) {
-        // SAFETY: Empty function body
+    ) -> impl Lender
+           + for<'lend> bevy_ecs::lender::Lending<
+        'lend,
+        Lend = (
+            bevy_ecs::component::StorageType,
+            bevy_ecs::ptr::OwningPtr<'lend>,
+        ),
+    > {
+        // SAFETY: Empty iterator
+        bevy_ecs::lender::empty::<
+            bevy_ecs::lender::lend!((
+                bevy_ecs::component::StorageType,
+                bevy_ecs::ptr::OwningPtr<'lend>
+            )),
+        >()
     }
 
     #[inline]

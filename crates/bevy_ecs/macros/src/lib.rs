@@ -155,15 +155,15 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
             #[inline]
             unsafe fn get_components(
                 ptr: #ecs_path::ptr::MovingPtr<'_, Self>,
-            ) -> impl lender::Lender + for<'lend> lender::Lending<'lend, Lend = (#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'lend>)> {
+            ) -> impl #ecs_path::lender::Lender + for<'lend> #ecs_path::lender::Lending<'lend, Lend = (#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'lend>)> {
                 use #ecs_path::__macro_exports::DebugCheckedUnwrap;
-                use lender::Lender;
+                use #ecs_path::lender::Lender;
 
                 #ecs_path::ptr::deconstruct_moving_ptr!({
                     let #struct_name { #(#active_field_members: #active_field_locals,)* #(#inactive_field_members: _,)* } = ptr;
                 });
 
-                lender::empty::<lender::lend!((#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'lend>))>()
+                #ecs_path::lender::empty::<#ecs_path::lender::lend!((#ecs_path::component::StorageType, #ecs_path::ptr::OwningPtr<'lend>))>()
                 #(
                     .chain(<#active_field_types as #ecs_path::bundle::DynamicBundle>::get_components(
                         #active_field_locals

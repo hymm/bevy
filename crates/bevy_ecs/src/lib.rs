@@ -59,6 +59,7 @@ pub mod traversal;
 pub mod world;
 
 pub use bevy_ptr as ptr;
+pub use lender;
 
 #[cfg(feature = "hotpatching")]
 use message::Message;
