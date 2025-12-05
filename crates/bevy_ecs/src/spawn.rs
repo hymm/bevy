@@ -290,16 +290,19 @@ struct ComponentMaybeUninit<C: crate::component::Component> {
     uninit_c: MaybeUninit<C>,
     yielded: bool,
 }
-impl<'this, 'lend, C: crate::component::Component> Lending<'lend> for ComponentMaybeUninit<C> {
+impl<'lend, C: crate::component::Component> Lending<'lend> for ComponentMaybeUninit<C> {
     type Lend = (crate::component::StorageType, bevy_ptr::OwningPtr<'lend>);
 }
-impl<'this, C: crate::component::Component> Lender for ComponentMaybeUninit<C> {
+impl<C: crate::component::Component> Lender for ComponentMaybeUninit<C> {
     fn next(&mut self) -> Option<lender::Lend<'_, Self>> {
         if self.yielded {
             None
         } else {
             self.yielded = true;
             let inner = NonNull::from_mut(&mut self.uninit_c);
+            // SAFETY:
+            // * the valid is valid since it was constructed from concrete C with `Self::new` and cannot be invalidated if yielded is `false`.
+            // * The OwningPtr's lifetime is linked to &mut self
             Some((C::STORAGE_TYPE, unsafe {
                 crate::ptr::OwningPtr::new(inner.cast::<u8>())
             }))
