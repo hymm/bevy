@@ -115,7 +115,7 @@ impl<'w> BundleSpawner<'w> {
                 entity,
                 table_row,
                 self.change_tick,
-                bundle,
+                T::get_components(bundle),
                 InsertMode::Replace,
                 caller,
             );

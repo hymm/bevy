@@ -211,7 +211,7 @@ impl<'w> BundleInserter<'w> {
                     entity,
                     location.table_row,
                     self.change_tick,
-                    bundle,
+                    T::get_components(bundle),
                     insert_mode,
                     caller,
                 );
@@ -252,7 +252,7 @@ impl<'w> BundleInserter<'w> {
                     entity,
                     result.table_row,
                     self.change_tick,
-                    bundle,
+                    T::get_components(bundle),
                     insert_mode,
                     caller,
                 );
@@ -334,7 +334,7 @@ impl<'w> BundleInserter<'w> {
                     entity,
                     move_result.new_row,
                     self.change_tick,
-                    bundle,
+                    T::get_components(bundle),
                     insert_mode,
                     caller,
                 );

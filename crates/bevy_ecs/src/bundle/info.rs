@@ -3,15 +3,15 @@ use bevy_platform::{
     collections::{HashMap, HashSet},
     hash::FixedHasher,
 };
-use bevy_ptr::{MovingPtr, OwningPtr};
+use bevy_ptr::OwningPtr;
 use bevy_utils::TypeIdMap;
 use core::{any::TypeId, ptr::NonNull};
 use indexmap::{IndexMap, IndexSet};
-use lender::Lender;
+use lender::{Lender, Lending};
 
 use crate::{
     archetype::{Archetype, BundleComponentStatus, ComponentStatus},
-    bundle::{Bundle, DynamicBundle},
+    bundle::Bundle,
     change_detection::{MaybeLocation, Tick},
     component::{
         ComponentId, Components, ComponentsRegistrator, RequiredComponentConstructor, StorageType,
@@ -237,24 +237,24 @@ impl BundleInfo {
     ///
     /// [`apply_effect`]: crate::bundle::DynamicBundle::apply_effect
     #[inline]
-    pub(super) unsafe fn write_components<'a, T: DynamicBundle, S: BundleComponentStatus>(
+    pub(super) unsafe fn write_components<'a, S: BundleComponentStatus>(
         &self,
         table: &mut Table,
         sparse_sets: &mut SparseSets,
         bundle_component_status: &S,
+        // TODO: this probably reintroduces the bundle stack overflow
         required_components: impl Iterator<Item = &'a RequiredComponentConstructor>,
         entity: Entity,
         table_row: TableRow,
         change_tick: Tick,
-        bundle: MovingPtr<'_, T>,
+        mut components: impl Lender + for<'lend> Lending<'lend, Lend = (StorageType, OwningPtr<'lend>)>,
         insert_mode: InsertMode,
         caller: MaybeLocation,
     ) {
         // NOTE: get_components calls this closure on each component in "bundle order".
         // bundle_info.component_ids are also in "bundle order"
         let mut bundle_component = 0;
-        let mut lender = T::get_components(bundle);
-        while let Some((storage_type, component_ptr)) = lender.next() {
+        while let Some((storage_type, component_ptr)) = components.next() {
             let component_id = *self
                 .contributed_component_ids
                 .get_unchecked(bundle_component);
