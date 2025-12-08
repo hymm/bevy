@@ -30,6 +30,7 @@ extern crate alloc;
 extern crate self as bevy_ecs;
 
 pub mod archetype;
+pub mod batched_commands;
 pub mod batching;
 pub mod bundle;
 pub mod change_detection;

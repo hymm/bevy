@@ -12,6 +12,12 @@ repository = "https://github.com/bevyengine/bevy"
 documentation = "https://docs.rs/bevy"
 rust-version = "1.89.0"
 
+[profile.dev.package.windows]
+hint-mostly-unused = true
+
+[profile.release.package.windows]
+hint-mostly-unused = true
+
 [workspace]
 resolver = "2"
 members = [
