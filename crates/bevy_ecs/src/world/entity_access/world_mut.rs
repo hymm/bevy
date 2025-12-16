@@ -1162,8 +1162,7 @@ impl<'w> EntityWorldMut<'w> {
             &self.world.components,
             component_ids,
         );
-        let mut storage_types =
-            core::mem::take(self.world.bundles.get_storages_unchecked(bundle_id));
+        let mut storage_types = mem::take(self.world.bundles.get_storages_unchecked(bundle_id));
         let bundle_inserter =
             BundleInserter::new_with_id(self.world, location.archetype_id, bundle_id, change_tick);
 
@@ -1177,7 +1176,7 @@ impl<'w> EntityWorldMut<'w> {
             MaybeLocation::caller(),
             relationship_hook_insert_mode,
         ));
-        *self.world.bundles.get_storages_unchecked(bundle_id) = core::mem::take(&mut storage_types);
+        *self.world.bundles.get_storages_unchecked(bundle_id) = mem::take(&mut storage_types);
         self.world.flush();
         self.update_location();
         self
@@ -2306,32 +2305,32 @@ unsafe fn insert_dynamic_bundle<
 ) -> EntityLocation {
     struct DynamicInsertBundlePtr<
         'a,
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
-    >(MovingPtr<'a, DynamicInsertBundle<I>>);
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
+    >(MovingPtr<'a, DynamicInsertBundle<'a, I>>);
 
     impl<'a, I> LendingIterator for DynamicInsertBundlePtr<'a, I>
     where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
     {
         type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>;
 
         fn next(&mut self) -> Option<(StorageType, OwningPtr<'a>)> {
-            // TODO: try to understand this safety better
+            // TODO: try to understand this safety better, check that we can't extend the lifetime to 'static
             // SAFETY: 'a is garunteed to live for 'self, since it's external to Self
             unsafe { mem::transmute(self.0.components.next()) }
         }
     }
 
-    struct DynamicInsertBundle<I>
+    struct DynamicInsertBundle<'a, I>
     where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
     {
         components: I,
     }
 
-    impl<I> DynamicBundle for DynamicInsertBundle<I>
+    impl<'a, I> DynamicBundle for DynamicInsertBundle<'a, I>
     where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'all>)>>,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
     {
         type Effect = ();
         unsafe fn get_components(
@@ -2349,7 +2348,7 @@ unsafe fn insert_dynamic_bundle<
     }
 
     let bundle = DynamicInsertBundle {
-        components: lender_dyn::from_iter(storage_types.zip(components)),
+        components: lender_dyn::from_iter::from_iter(storage_types.zip(components)),
     };
 
     move_as_ptr!(bundle);
