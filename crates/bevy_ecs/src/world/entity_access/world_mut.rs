@@ -2303,20 +2303,40 @@ unsafe fn insert_dynamic_bundle<
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
-    struct DynamicInsertBundle<I> {
+    struct DynamicInsertBundlePtr<
+        'a,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
+    >(MovingPtr<'a, DynamicInsertBundle<'a, I>>);
+
+    impl<'a, I> LendingIterator for DynamicInsertBundlePtr<'a, I>
+    where
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
+    {
+        type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>;
+
+        fn next(&mut self) -> Option<(StorageType, OwningPtr<'a>)> {
+            // TODO: try to understand this safety better, check that we can't extend the lifetime to 'static
+            // SAFETY: 'a is garunteed to live for 'self, since it's external to Self
+            unsafe { mem::transmute(self.0.components.next()) }
+        }
+    }
+
+    struct DynamicInsertBundle<'a, I>
+    where
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
+    {
         components: I,
     }
 
-    impl<'a, I> DynamicBundle for DynamicInsertBundle<I>
+    impl<'a, I> DynamicBundle for DynamicInsertBundle<'a, I>
     where
-        I: Iterator<Item = (StorageType, OwningPtr<'a>)>,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
     {
         type Effect = ();
-        unsafe fn get_components<'b>(
-            ptr: MovingPtr<'b, Self>,
-        ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'b>)>>
-        {
-            lender_dyn::from_iter::from_iter(ptr.components)
+        unsafe fn get_components(
+            ptr: MovingPtr<'a, DynamicInsertBundle<'a, I>>,
+        ) -> DynamicInsertBundlePtr<'a, I> {
+            DynamicInsertBundlePtr(ptr)
         }
 
         unsafe fn apply_effect(
@@ -2327,7 +2347,7 @@ unsafe fn insert_dynamic_bundle<
     }
 
     let bundle = DynamicInsertBundle {
-        components: storage_types.zip(components),
+        components: lender_dyn::from_iter::from_iter(storage_types.zip(components)),
     };
 
     move_as_ptr!(bundle);
