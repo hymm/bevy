@@ -6,11 +6,12 @@
     html_logo_url = "https://bevy.org/assets/icon.png",
     html_favicon_url = "https://bevy.org/assets/icon.png"
 )]
+#![feature(derive_coerce_pointee)]
 
 use core::{
     cell::UnsafeCell,
     fmt::{self, Debug, Formatter, Pointer},
-    marker::PhantomData,
+    marker::{CoercePointee, PhantomData},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
@@ -349,8 +350,12 @@ pub struct OwningPtr<'a, A: IsAligned = Aligned>(NonNull<u8>, PhantomData<(&'a m
 ///
 /// [properly aligned]: https://doc.rust-lang.org/std/ptr/index.html#alignment
 /// [`Box`]: https://doc.rust-lang.org/std/boxed/struct.Box.html
+#[derive(CoercePointee)]
 #[repr(transparent)]
-pub struct MovingPtr<'a, T, A: IsAligned = Aligned>(NonNull<T>, PhantomData<(&'a mut T, A)>);
+pub struct MovingPtr<'a, #[pointee] T: ?Sized, A: IsAligned = Aligned>(
+    NonNull<T>,
+    PhantomData<(&'a mut T, A)>,
+);
 
 macro_rules! impl_ptr {
     ($ptr:ident) => {
@@ -795,7 +800,7 @@ impl<T> DerefMut for MovingPtr<'_, T, Aligned> {
     }
 }
 
-impl<T, A: IsAligned> Drop for MovingPtr<'_, T, A> {
+impl<T: ?Sized, A: IsAligned> Drop for MovingPtr<'_, T, A> {
     fn drop(&mut self) {
         // SAFETY:
         //  - `self.0` must be valid for reads and writes as this pointer type owns the value it points to.
