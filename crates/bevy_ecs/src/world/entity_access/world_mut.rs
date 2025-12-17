@@ -2304,17 +2304,20 @@ unsafe fn insert_dynamic_bundle<
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
     struct DynamicInsertBundlePtr<
-        'a,
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
-    >(MovingPtr<'a, DynamicInsertBundle<'a, I>>);
+        'ptr,
+        'bundle,
+        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>>,
+    >(MovingPtr<'ptr, DynamicInsertBundle<'bundle, I>>);
 
-    impl<'a, I> LendingIterator for DynamicInsertBundlePtr<'a, I>
+    impl<'ptr, 'bundle, I> LendingIterator for DynamicInsertBundlePtr<'ptr, 'bundle, I>
     where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
+        I: LendingIterator<
+            Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>,
+        >,
     {
-        type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>;
+        type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>;
 
-        fn next(&mut self) -> Option<(StorageType, OwningPtr<'a>)> {
+        fn next(&mut self) -> Option<(StorageType, OwningPtr<'bundle>)> {
             // TODO: try to understand this safety better, check that we can't extend the lifetime to 'static
             // SAFETY: 'a is garunteed to live for 'self, since it's external to Self
             unsafe { mem::transmute(self.0.components.next()) }
@@ -2333,9 +2336,9 @@ unsafe fn insert_dynamic_bundle<
         I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
     {
         type Effect = ();
-        unsafe fn get_components(
-            ptr: MovingPtr<'a, DynamicInsertBundle<'a, I>>,
-        ) -> DynamicInsertBundlePtr<'a, I> {
+        unsafe fn get_components<'b>(
+            ptr: MovingPtr<'b, DynamicInsertBundle<'a, I>>,
+        ) -> DynamicInsertBundlePtr<'b, 'a, I> {
             DynamicInsertBundlePtr(ptr)
         }
 
