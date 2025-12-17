@@ -343,14 +343,14 @@ unsafe impl<R: Relationship, L: SpawnableList<R> + Send + Sync + 'static> Bundle
 impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<R, L> {
     type Effect = Self;
 
-    unsafe fn get_components(
-        ptr: MovingPtr<'_, Self>,
-    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>
+    unsafe fn get_components<'a>(
+        self: MovingPtr<'a, Self>,
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>
     {
         let target =
-            <R::RelationshipTarget as RelationshipTarget>::with_capacity(ptr.list.size_hint());
+            <R::RelationshipTarget as RelationshipTarget>::with_capacity(self.list.size_hint());
         // Forget the pointer so that the value is available in `apply_effect`.
-        mem::forget(ptr);
+        mem::forget(self);
         ComponentMaybeUninit {
             uninit_c: MaybeUninit::new(target),
             yielded: false,
@@ -386,13 +386,13 @@ pub struct SpawnOneRelated<R: Relationship, B: Bundle> {
 impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
     type Effect = Self;
 
-    unsafe fn get_components(
-        ptr: MovingPtr<'_, Self>,
-    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>>
+    unsafe fn get_components<'a>(
+        self: MovingPtr<'a, Self>,
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>
     {
         let target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
         // Forget the pointer so that the value is available in `apply_effect`.
-        mem::forget(ptr);
+        mem::forget(self);
         ComponentMaybeUninit {
             uninit_c: MaybeUninit::new(target),
             yielded: false,

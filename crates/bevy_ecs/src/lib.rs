@@ -17,6 +17,7 @@
     html_favicon_url = "https://bevy.org/assets/icon.png"
 )]
 #![no_std]
+#![feature(arbitrary_self_types)]
 
 #[cfg(feature = "std")]
 extern crate std;

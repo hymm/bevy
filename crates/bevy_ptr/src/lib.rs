@@ -808,7 +808,7 @@ impl<T: ?Sized, A: IsAligned> Drop for MovingPtr<'_, T, A> {
         //  - If `A` is `Aligned`, then `ptr` must be properly aligned for type `T` by construction.
         //  - `self.0` owns the value it points to so it must always be valid for dropping until this pointer is dropped.
         //  - This type owns the value it points to, so it's required to not mutably alias value that it points to.
-        unsafe { A::drop_in_place(self.0.as_ptr()) };
+        // unsafe { A::drop_in_place(self.0.as_ptr()) };
     }
 }
 

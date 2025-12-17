@@ -44,11 +44,11 @@ unsafe impl<C: Component> BundleFromComponents for C {
 impl<C: Component> DynamicBundle for C {
     type Effect = ();
     #[inline]
-    unsafe fn get_components(
-        ptr: MovingPtr<'_, Self>,
-    ) -> impl LendingIterator<Lend = dyn for<'a> Lend<'a, Item = (StorageType, OwningPtr<'_>)>>
+    unsafe fn get_components<'a>(
+        self: MovingPtr<'a, Self>,
+    ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>
     {
-        lender_dyn::once::once((C::STORAGE_TYPE, OwningPtr::from(ptr)))
+        lender_dyn::once::once((C::STORAGE_TYPE, OwningPtr::from(self)))
     }
 
     #[inline]
@@ -135,11 +135,11 @@ macro_rules! tuple_impl {
                 reason = "Zero-length tuples will generate a function body equivalent to `()`; however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."
             )]
             #[inline(always)]
-            unsafe fn get_components(
-                ptr: MovingPtr<'_, Self>
-            ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'_>)>> {
+            unsafe fn get_components<'a>(
+                self: MovingPtr<'a, Self>
+            ) -> impl LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>> {
                 bevy_ptr::deconstruct_moving_ptr!({
-                    let tuple { $($index: $alias,)* } = ptr;
+                    let tuple { $($index: $alias,)* } = self;
                 });
                 #[allow(
                     unused_unsafe,
