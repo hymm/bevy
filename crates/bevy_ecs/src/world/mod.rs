@@ -2456,7 +2456,7 @@ impl World {
                         cache.inserter.insert(
                             first_entity,
                             first_location,
-                            first_bundle,
+                            B::get_components(first_bundle),
                             insert_mode,
                             caller,
                             RelationshipHookMode::Run,
@@ -2486,7 +2486,7 @@ impl World {
                                     cache.inserter.insert(
                                         entity,
                                         location,
-                                        bundle,
+                                        B::get_components(bundle),
                                         insert_mode,
                                         caller,
                                         RelationshipHookMode::Run,
@@ -2608,7 +2608,7 @@ impl World {
                         cache.inserter.insert(
                             first_entity,
                             first_location,
-                            first_bundle,
+                            B::get_components(first_bundle),
                             insert_mode,
                             caller,
                             RelationshipHookMode::Run,
@@ -2650,7 +2650,7 @@ impl World {
                         cache.inserter.insert(
                             entity,
                             location,
-                            bundle,
+                            B::get_components(bundle),
                             insert_mode,
                             caller,
                             RelationshipHookMode::Run,

@@ -1,13 +1,14 @@
 use alloc::vec::Vec;
-use bevy_ptr::{ConstNonNull, MovingPtr};
+use bevy_ptr::{ConstNonNull, OwningPtr};
 use core::ptr::NonNull;
+use lender_dyn::{Lend, LendingIterator};
 
 use crate::{
     archetype::{
         Archetype, ArchetypeAfterBundleInsert, ArchetypeCreated, ArchetypeId, Archetypes,
         ComponentStatus,
     },
-    bundle::{ArchetypeMoveType, Bundle, BundleId, BundleInfo, DynamicBundle, InsertMode},
+    bundle::{ArchetypeMoveType, Bundle, BundleId, BundleInfo, InsertMode},
     change_detection::{MaybeLocation, Tick},
     component::{Components, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -334,11 +335,13 @@ impl<'w> BundleInserter<'w> {
     ///
     /// [`apply_effect`]: crate::bundle::DynamicBundle::apply_effect
     #[inline]
-    pub(crate) unsafe fn insert<T: DynamicBundle>(
+    pub(crate) unsafe fn insert<'a>(
         &mut self,
         entity: Entity,
         location: EntityLocation,
-        bundle: MovingPtr<'_, T>,
+        components: impl LendingIterator<
+            Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>,
+        >,
         insert_mode: InsertMode,
         caller: MaybeLocation,
         relationship_hook_mode: RelationshipHookMode,
@@ -368,7 +371,7 @@ impl<'w> BundleInserter<'w> {
                 entity,
                 table_row,
                 self.change_tick,
-                bundle,
+                components,
                 insert_mode,
                 caller,
             );

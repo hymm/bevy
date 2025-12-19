@@ -26,12 +26,7 @@ use crate::{
 
 use alloc::vec::Vec;
 use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
-use core::{
-    any::TypeId,
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
-};
-use lender_dyn::{Lend, LendingIterator};
+use core::{any::TypeId, marker::PhantomData, mem};
 
 /// A mutable reference to a particular [`Entity`], and the entire world.
 ///
@@ -1035,7 +1030,7 @@ impl<'w> EntityWorldMut<'w> {
             bundle_inserter.insert(
                 self.entity,
                 location,
-                bundle,
+                T::get_components(bundle),
                 mode,
                 caller,
                 relationship_hook_mode,
@@ -2303,58 +2298,6 @@ unsafe fn insert_dynamic_bundle<
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
-    struct DynamicInsertBundlePtr<
-        'ptr,
-        'bundle,
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>>,
-    >(MovingPtr<'ptr, DynamicInsertBundle<'bundle, I>>);
-
-    impl<'ptr, 'bundle, I> LendingIterator for DynamicInsertBundlePtr<'ptr, 'bundle, I>
-    where
-        I: LendingIterator<
-            Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>,
-        >,
-    {
-        type Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'bundle>)>;
-
-        fn next(&mut self) -> Option<(StorageType, OwningPtr<'bundle>)> {
-            // TODO: try to understand this safety better, check that we can't extend the lifetime to 'static
-            // SAFETY: 'a is garunteed to live for 'self, since it's external to Self
-            unsafe { mem::transmute(self.0.components.next()) }
-        }
-    }
-
-    struct DynamicInsertBundle<'a, I>
-    where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
-    {
-        components: I,
-    }
-
-    impl<'a, I> DynamicBundle for DynamicInsertBundle<'a, I>
-    where
-        I: LendingIterator<Lend = dyn for<'all> Lend<'all, Item = (StorageType, OwningPtr<'a>)>>,
-    {
-        type Effect = ();
-        unsafe fn get_components<'b>(
-            ptr: MovingPtr<'b, DynamicInsertBundle<'a, I>>,
-        ) -> DynamicInsertBundlePtr<'b, 'a, I> {
-            DynamicInsertBundlePtr(ptr)
-        }
-
-        unsafe fn apply_effect(
-            _ptr: MovingPtr<'_, MaybeUninit<Self>>,
-            _entity: &mut EntityWorldMut,
-        ) {
-        }
-    }
-
-    let bundle = DynamicInsertBundle {
-        components: lender_dyn::from_iter::from_iter(storage_types.zip(components)),
-    };
-
-    move_as_ptr!(bundle);
-
     // SAFETY:
     // - `location` matches `entity`.  and thus must currently exist in the source
     //   archetype for this inserter and its location within the archetype.
@@ -2365,7 +2308,7 @@ unsafe fn insert_dynamic_bundle<
         bundle_inserter.insert(
             entity,
             location,
-            bundle,
+            lender_dyn::from_iter::from_iter(storage_types.zip(components)),
             mode,
             caller,
             relationship_hook_insert_mode,

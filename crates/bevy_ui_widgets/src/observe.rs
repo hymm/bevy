@@ -7,7 +7,6 @@ use core::marker::PhantomData;
 use bevy_ecs::{
     bundle::{Bundle, DynamicBundle},
     event::EntityEvent,
-    lender::Lender,
     system::IntoObserverSystem,
 };
 
@@ -46,25 +45,22 @@ impl<E: EntityEvent, B: Bundle, M, I: IntoObserverSystem<E, B, M>> DynamicBundle
     for AddObserver<E, B, M, I>
 {
     type Effect = Self;
-
     #[inline]
     unsafe fn get_components(
-        _ptr: bevy_ecs::ptr::MovingPtr<'_, Self>,
-    ) -> impl Lender
-           + for<'lend> bevy_ecs::lender::Lending<
-        'lend,
-        Lend = (
-            bevy_ecs::component::StorageType,
-            bevy_ecs::ptr::OwningPtr<'lend>,
-        ),
-    > {
-        // SAFETY: Empty iterator
-        bevy_ecs::lender::empty::<
-            bevy_ecs::lender::lend!((
+        ptr: bevy_ecs::ptr::MovingPtr<'_, Self>,
+    ) -> impl bevy_ecs::lender_dyn::LendingIterator<
+        Lend = dyn for<'all> bevy_ecs::lender_dyn::Lend<
+            'all,
+            Item = (
                 bevy_ecs::component::StorageType,
-                bevy_ecs::ptr::OwningPtr<'lend>
-            )),
-        >()
+                bevy_ecs::ptr::OwningPtr<'_>,
+            ),
+        >,
+    > {
+        // forget the ptr so it is available in apply_effect
+        core::mem::forget(ptr);
+        // SAFETY: Empty iterator
+        bevy_ecs::lender_dyn::empty::empty()
     }
 
     #[inline]
