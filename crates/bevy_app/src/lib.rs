@@ -6,7 +6,7 @@
     )
 )]
 #![cfg_attr(any(docsrs, docsrs_dep), feature(doc_cfg, rustdoc_internals))]
-#![forbid(unsafe_code)]
+// #![forbid(unsafe_code)] will probably just move tls to bevy ecs
 #![doc(
     html_logo_url = "https://bevy.org/assets/icon.png",
     html_favicon_url = "https://bevy.org/assets/icon.png"
@@ -35,6 +35,7 @@ mod sub_app;
 mod task_pool_plugin;
 #[cfg(all(any(all(unix, not(target_os = "horizon")), windows), feature = "std"))]
 mod terminal_ctrl_c_handler;
+mod thread_local_param;
 
 #[cfg(feature = "hotpatching")]
 pub mod hotpatch;
