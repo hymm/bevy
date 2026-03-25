@@ -67,7 +67,7 @@ impl<'w> BundleInserter<'w> {
         );
 
         let inserter = if new_archetype_id == archetype_id {
-            let archetype = &mut world.archetypes[archetype_id];
+            let archetype = world.archetypes[archetype_id].as_mut().unwrap();
             // SAFETY: The edge is assured to be initialized when we called insert_bundle_into_archetype
             let archetype_after_insert = unsafe {
                 archetype
@@ -264,7 +264,8 @@ impl<'w> BundleInserter<'w> {
                 // SAFETY: Mutable references do not alias and will be dropped after this block
                 let (archetypes_ptr, sparse_sets, entities) = {
                     let world = world.world_mut();
-                    let archetype_ptr: *mut Archetype = world.archetypes.archetypes.as_mut_ptr();
+                    let archetype_ptr: *mut Option<Archetype> =
+                        world.archetypes.archetypes.as_mut_ptr();
                     (
                         archetype_ptr,
                         &mut world.storages.sparse_sets,
@@ -317,6 +318,7 @@ impl<'w> BundleInserter<'w> {
                     } else {
                         // SAFETY: the only two borrowed archetypes are above and we just did collision checks
                         (*archetypes_ptr.add(swapped_location.archetype_id.index()))
+                            .unwrap()
                             .set_entity_table_row(swapped_location.archetype_row, result.table_row);
                     }
                 }
@@ -516,6 +518,7 @@ impl BundleInfo {
         archetype_id: ArchetypeId,
     ) -> (ArchetypeId, bool) {
         if let Some(archetype_after_insert_id) = archetypes[archetype_id]
+            .unwrap()
             .edges()
             .get_archetype_after_bundle_insert(self.id)
         {

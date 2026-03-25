@@ -771,7 +771,7 @@ pub type ComponentIndex = HashMap<ComponentId, HashMap<ArchetypeId, ArchetypeRec
 /// [`World`]: crate::world::World
 /// [module level documentation]: crate::archetype
 pub struct Archetypes {
-    pub(crate) archetypes: Vec<Archetype>,
+    pub(crate) archetypes: Vec<Option<Archetype>>,
     /// find the archetype id by the archetype's components
     by_components: HashMap<ArchetypeComponents, ArchetypeId>,
     /// find all the archetypes that contain a component
@@ -836,7 +836,12 @@ impl Archetypes {
     #[inline]
     pub fn empty(&self) -> &Archetype {
         // SAFETY: empty archetype always exists
-        unsafe { self.archetypes.get_unchecked(ArchetypeId::EMPTY.index()) }
+        unsafe {
+            self.archetypes
+                .get_unchecked(ArchetypeId::EMPTY.index())
+                .as_ref()
+                .unwrap_unchecked()
+        }
     }
 
     /// Fetches a mutable reference to the archetype without any components.
@@ -846,6 +851,8 @@ impl Archetypes {
         unsafe {
             self.archetypes
                 .get_unchecked_mut(ArchetypeId::EMPTY.index())
+                .as_mut()
+                .unwrap_unchecked()
         }
     }
 
@@ -853,7 +860,7 @@ impl Archetypes {
     /// ID. Returns `None` if no corresponding archetype exists.
     #[inline]
     pub fn get(&self, id: ArchetypeId) -> Option<&Archetype> {
-        self.archetypes.get(id.index())
+        self.archetypes.get(id.index()).and_then(|x| x.as_ref())
     }
 
     /// # Panics
@@ -867,17 +874,23 @@ impl Archetypes {
     ) -> (&mut Archetype, &mut Archetype) {
         if a.index() > b.index() {
             let (b_slice, a_slice) = self.archetypes.split_at_mut(a.index());
-            (&mut a_slice[0], &mut b_slice[b.index()])
+            (
+                a_slice[0].as_mut().unwrap(),
+                b_slice[b.index()].as_mut().unwrap(),
+            )
         } else {
             let (a_slice, b_slice) = self.archetypes.split_at_mut(b.index());
-            (&mut a_slice[a.index()], &mut b_slice[0])
+            (
+                a_slice[a.index()].as_mut().unwrap(),
+                b_slice[0].as_mut().unwrap(),
+            )
         }
     }
 
     /// Returns a read-only iterator over all archetypes.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = &Archetype> {
-        self.archetypes.iter()
+        self.archetypes.iter().filter_map(Option::as_ref)
     }
 
     /// Gets the archetype id matching the given inputs or inserts a new one if it doesn't exist.
@@ -913,7 +926,7 @@ impl Archetypes {
                     sparse_set_components,
                 } = vacant.key();
                 let id = ArchetypeId::new(archetypes.len());
-                archetypes.push(Archetype::new(
+                archetypes.push(Some(Archetype::new(
                     components,
                     component_index,
                     observers,
@@ -921,7 +934,7 @@ impl Archetypes {
                     table_id,
                     table_components.iter().copied(),
                     sparse_set_components.iter().copied(),
-                ));
+                )));
                 vacant.insert(id);
                 (id, true)
             }
@@ -931,7 +944,9 @@ impl Archetypes {
     /// Clears all entities from all archetypes.
     pub(crate) fn clear_entities(&mut self) {
         for archetype in &mut self.archetypes {
-            archetype.clear_entities();
+            if let Some(archetype) = archetype {
+                archetype.clear_entities();
+            }
         }
     }
 
@@ -952,6 +967,8 @@ impl Archetypes {
                 self.archetypes
                     .get_mut(archetype_id.index())
                     .unwrap()
+                    .as_mut()
+                    .unwrap()
                     .flags
                     .set(flags, set);
             }
@@ -960,7 +977,7 @@ impl Archetypes {
 }
 
 impl Index<RangeFrom<ArchetypeGeneration>> for Archetypes {
-    type Output = [Archetype];
+    type Output = [Option<Archetype>];
 
     #[inline]
     fn index(&self, index: RangeFrom<ArchetypeGeneration>) -> &Self::Output {
@@ -969,7 +986,7 @@ impl Index<RangeFrom<ArchetypeGeneration>> for Archetypes {
 }
 
 impl Index<ArchetypeId> for Archetypes {
-    type Output = Archetype;
+    type Output = Option<Archetype>;
 
     #[inline]
     fn index(&self, index: ArchetypeId) -> &Self::Output {
