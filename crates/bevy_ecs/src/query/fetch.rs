@@ -9,8 +9,8 @@ use crate::{
     entity::{Entities, Entity, EntityLocation},
     query::{
         access_iter::{EcsAccessLevel, EcsAccessType},
-        Access, DebugCheckedUnwrap, FilteredAccess, FilteredAccessSet, QueryFilter, QueryState,
-        WorldQuery,
+        Access, ConstAccess, DebugCheckedUnwrap, FilteredAccess, FilteredAccessSet, QueryFilter,
+        QueryState, WorldQuery, WorldQueryConst,
     },
     storage::{ComponentSparseSet, Table, TableRow},
     system::Query,
@@ -591,6 +591,12 @@ unsafe impl QueryData for Entity {
     }
 }
 
+impl WorldQueryConst for Entity {
+    fn iter_const_access() -> impl Iterator<Item = super::ConstAccess> {
+        iter::empty()
+    }
+}
+
 // SAFETY: access is read only and only on the current entity
 unsafe impl IterQueryData for Entity {}
 
@@ -713,6 +719,12 @@ unsafe impl QueryData for EntityLocation {
     }
 
     fn iter_access(_state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
+        iter::empty()
+    }
+}
+
+impl WorldQueryConst for EntityLocation {
+    fn iter_const_access() -> impl Iterator<Item = super::ConstAccess> {
         iter::empty()
     }
 }
@@ -920,6 +932,12 @@ unsafe impl QueryData for SpawnDetails {
     }
 }
 
+impl WorldQueryConst for SpawnDetails {
+    fn iter_const_access() -> impl Iterator<Item = super::ConstAccess> {
+        iter::empty()
+    }
+}
+
 // SAFETY: access is read only and only on the current entity
 unsafe impl IterQueryData for SpawnDetails {}
 
@@ -1059,6 +1077,12 @@ unsafe impl<'a> QueryData for EntityRef<'a> {
     }
 }
 
+impl WorldQueryConst for EntityRef<'_> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::ReadAll)
+    }
+}
+
 // SAFETY: access is read only and only on the current entity
 unsafe impl IterQueryData for EntityRef<'_> {}
 
@@ -1182,6 +1206,12 @@ unsafe impl<'a> QueryData for EntityMut<'a> {
 
     fn iter_access(_state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         iter::once(EcsAccessType::Component(EcsAccessLevel::WriteAll))
+    }
+}
+
+impl WorldQueryConst for EntityMut<'_> {
+    fn iter_const_access() -> impl Iterator<Item = super::ConstAccess> {
+        iter::once(ConstAccess::WriteAll)
     }
 }
 
@@ -1329,6 +1359,12 @@ unsafe impl<'a, 'b> QueryData for FilteredEntityRef<'a, 'b> {
     }
 }
 
+impl WorldQueryConst for FilteredEntityRef<'_, '_> {
+    fn iter_const_access() -> impl Iterator<Item = super::ConstAccess> {
+        iter::once(ConstAccess::Unknown)
+    }
+}
+
 // SAFETY: access is read only and only on the current entity
 unsafe impl IterQueryData for FilteredEntityRef<'_, '_> {}
 
@@ -1468,6 +1504,12 @@ unsafe impl<'a, 'b> QueryData for FilteredEntityMut<'a, 'b> {
     }
 }
 
+impl WorldQueryConst for FilteredEntityMut<'_, '_> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::Unknown)
+    }
+}
+
 // SAFETY: access is only on the current entity
 unsafe impl IterQueryData for FilteredEntityMut<'_, '_> {}
 
@@ -1595,6 +1637,16 @@ where
 
     fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         iter::once(EcsAccessType::Access(state))
+    }
+}
+
+impl<B> WorldQueryConst for EntityRefExcept<'_, '_, B>
+where
+    B: Bundle,
+{
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        // TODO: this is probably calculable at compile time
+        iter::once(ConstAccess::Unknown)
     }
 }
 
@@ -1732,6 +1784,16 @@ where
     }
 }
 
+impl<B> WorldQueryConst for EntityMutExcept<'_, '_, B>
+where
+    B: Bundle,
+{
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        // TODO: this is probably calculable at compile time
+        iter::once(ConstAccess::Unknown)
+    }
+}
+
 // SAFETY: access is only on the current entity
 unsafe impl<B> IterQueryData for EntityMutExcept<'_, '_, B> where B: Bundle {}
 
@@ -1835,6 +1897,12 @@ unsafe impl QueryData for &Archetype {
     }
 
     fn iter_access(_state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
+        iter::empty()
+    }
+}
+
+impl WorldQueryConst for &Archetype {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
         iter::empty()
     }
 }
@@ -2025,6 +2093,12 @@ unsafe impl<T: Component> QueryData for &T {
 
     fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         iter::once(EcsAccessType::Component(EcsAccessLevel::Read(*state)))
+    }
+}
+
+impl<T: Component> WorldQueryConst for &T {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::Read(<T as Component>::TYPE_ID))
     }
 }
 
@@ -2297,6 +2371,12 @@ unsafe impl<'__w, T: Component> QueryData for Ref<'__w, T> {
 
     fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         iter::once(EcsAccessType::Component(EcsAccessLevel::Read(*state)))
+    }
+}
+
+impl<'__w, T: Component> WorldQueryConst for Ref<'__w, T> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::Read(<T as Component>::TYPE_ID))
     }
 }
 
@@ -2595,6 +2675,12 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
     }
 }
 
+impl<T: Component> WorldQueryConst for &mut T {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::Write(<T as Component>::TYPE_ID))
+    }
+}
+
 // SAFETY: access is only on the current entity
 unsafe impl<T: Component<Mutability = Mutable>> IterQueryData for &mut T {}
 
@@ -2775,6 +2861,12 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T>
 
     fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         iter::once(EcsAccessType::Component(EcsAccessLevel::Write(*state)))
+    }
+}
+
+impl<T: Component> WorldQueryConst for Mut<'_, T> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::once(ConstAccess::Write(<T as Component>::TYPE_ID))
     }
 }
 
@@ -3179,6 +3271,14 @@ unsafe impl<D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static> QueryData
     }
 }
 
+impl<D: ReadOnlyQueryData, F: QueryFilter> WorldQueryConst for NestedQuery<D, F> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        // This performs no access on the current entity
+        // Access to the nested query is checked through `init_nested_access`
+        iter::empty()
+    }
+}
+
 // SAFETY: All access is through `D`, which is read-only
 unsafe impl<D: ReadOnlyQueryData, F: QueryFilter> ReadOnlyQueryData for NestedQuery<D, F> {}
 
@@ -3347,6 +3447,12 @@ unsafe impl<T: QueryData> QueryData for Option<T> {
 
     fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
         T::iter_access(state)
+    }
+}
+
+impl<T: WorldQuery> WorldQueryConst for Option<T> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        <T as WorldQueryConst>::iter_const_access()
     }
 }
 
@@ -3562,6 +3668,12 @@ unsafe impl<T: Component> QueryData for Has<T> {
     }
 }
 
+impl<T: Component> WorldQueryConst for Has<T> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::empty()
+    }
+}
+
 // SAFETY: access is read only and only on the current entity
 unsafe impl<T: Component> IterQueryData for Has<T> {}
 
@@ -3658,6 +3770,14 @@ macro_rules! impl_tuple_query_data {
             fn iter_access(state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
                 let ($($name,)*) = state;
                 iter::empty()$(.chain($name::iter_access($name)))*
+            }
+        }
+
+
+        $(#[$meta])*
+        impl<$($name: WorldQuery),*> WorldQueryConst for ($($name,)*) {
+            fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+                iter::empty()$(.chain($name::iter_const_access()))*
             }
         }
 
@@ -3920,6 +4040,12 @@ macro_rules! impl_anytuple_fetch {
             }
         }
 
+        impl<$($name: WorldQuery),*> WorldQueryConst for AnyOf<($($name,)*)> {
+            fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+                iter::empty()$(.chain($name::iter_const_access()))*
+            }
+        }
+
         $(#[$meta])*
         // SAFETY: each item in the tuple is iterable
         unsafe impl<$($name: IterQueryData),*> IterQueryData for AnyOf<($($name,)*)> {}
@@ -4104,6 +4230,12 @@ unsafe impl<D: QueryData> QueryData for NopWorldQuery<D> {
     }
 }
 
+impl<D: QueryData> WorldQueryConst for NopWorldQuery<D> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
+        iter::empty()
+    }
+}
+
 // SAFETY: `NopFetch` never accesses any data
 unsafe impl<D: QueryData> IterQueryData for NopWorldQuery<D> {}
 
@@ -4205,6 +4337,12 @@ unsafe impl<T: ?Sized> QueryData for PhantomData<T> {
     }
 
     fn iter_access(_state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
+        iter::empty()
+    }
+}
+
+impl<T: ?Sized> WorldQueryConst for PhantomData<T> {
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
         iter::empty()
     }
 }
@@ -4441,6 +4579,12 @@ mod tests {
             }
 
             fn iter_access(_state: &Self::State) -> impl Iterator<Item = EcsAccessType<'_>> {
+                iter::empty()
+            }
+        }
+
+        impl WorldQueryConst for NonReleaseQueryData {
+            fn iter_const_access() -> impl Iterator<Item = ConstAccess> {
                 iter::empty()
             }
         }

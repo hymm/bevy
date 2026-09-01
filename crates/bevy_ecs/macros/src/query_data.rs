@@ -475,6 +475,13 @@ pub fn derive_query_data_impl(input: TokenStream) -> TokenStream {
                     }
                 }
 
+                impl #user_impl_generics #path::query::WorldQueryConst
+                for #read_only_struct_name #user_ty_generics #user_where_clauses {
+                    fn iter_const_access() -> impl #FQIterator<Item = #path::query::ConstAccess> {
+                        ::core::iter::empty() #(.chain(<#field_types>::iter_const_access()))*
+                    }
+                }
+
                 // SAFETY: Access is read-only
                 unsafe impl #user_impl_generics #path::query::IterQueryData
                 for #read_only_struct_name #user_ty_generics #user_where_clauses {}
@@ -556,6 +563,14 @@ pub fn derive_query_data_impl(input: TokenStream) -> TokenStream {
                     ::core::iter::empty() #(.chain(<#field_types>::iter_access(&_state.#field_aliases)))*
                 }
             }
+
+            impl #user_impl_generics #path::query::WorldQueryConst
+            for #struct_name #user_ty_generics #user_where_clauses {
+                fn iter_const_access() -> impl #FQIterator<Item = #path::query::ConstAccess> {
+                    ::core::iter::empty() #(.chain(<#field_types>::iter_const_access()))*
+                }
+            }
+
 
             // SAFETY: All fields are iterable
             unsafe impl #user_impl_generics #path::query::IterQueryData

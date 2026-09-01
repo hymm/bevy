@@ -1,3 +1,5 @@
+use core::any::TypeId;
+
 use crate::{
     archetype::Archetype,
     change_detection::Tick,
@@ -41,7 +43,7 @@ use variadics_please::all_tuples;
 /// [`update_component_access`]: Self::update_component_access
 /// [`QueryData`]: crate::query::QueryData
 /// [`QueryFilter`]: crate::query::QueryFilter
-pub unsafe trait WorldQuery {
+pub unsafe trait WorldQuery: WorldQueryConst {
     /// Per archetype/table state retrieved by this [`WorldQuery`] to compute [`Self::Item`](crate::query::QueryData::Item) for each entity.
     type Fetch<'w>: Clone;
 
@@ -166,10 +168,10 @@ pub const trait WorldQueryConst {
 /// TODO
 #[derive(Clone, Copy, Debug, PartialEq, Hash)]
 pub enum ConstAccess {
-    /// Reads [`Component`](crate::prelude::Component) with [`ComponentId`]
-    Read(ComponentId),
-    /// Writes [`Component`](crate::prelude::Component) with [`ComponentId`]
-    Write(ComponentId),
+    /// Reads [`Component`](crate::prelude::Component) with [`TypeId`]
+    Read(TypeId),
+    /// Writes [`Component`](crate::prelude::Component) with [`TypeId`]
+    Write(TypeId),
     /// Potentially reads all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
     ReadAll,
     /// Potentially writes all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)

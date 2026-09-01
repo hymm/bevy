@@ -20,7 +20,7 @@ use crate::{
     world::{FromWorld, World},
 };
 pub use bevy_ecs_macros::Component;
-use core::{fmt::Debug, marker::PhantomData, ops::Deref};
+use core::{any::TypeId, fmt::Debug, marker::PhantomData, ops::Deref};
 
 /// A data type that can be used to store data for an [entity].
 ///
@@ -530,6 +530,9 @@ use core::{fmt::Debug, marker::PhantomData, ops::Deref};
 pub trait Component: Send + Sync + 'static {
     /// A constant indicating the storage type used for this component.
     const STORAGE_TYPE: StorageType;
+
+    /// Type ID of the component
+    const TYPE_ID: TypeId = const { TypeId::of::<Self>() };
 
     /// A marker type to assist Bevy with determining if this component is
     /// mutable, or immutable. Mutable components will have [`Component<Mutability = Mutable>`],
