@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use core::{any::TypeId, fmt::Display};
 
 use crate::{
     component::{ComponentId, Components},
@@ -17,7 +17,7 @@ const USE_FILTER_THRESHOLD: usize = 4;
 ///
 /// Returns an error if not all components are registered.
 #[inline(never)]
-pub fn has_conflicts<Q: QueryData>(components: &Components) -> Result<(), QueryAccessError> {
+pub const fn has_conflicts<Q: QueryData>(components: &Components) -> Result<(), QueryAccessError> {
     let Some(state) = Q::get_state(components) else {
         return Err(QueryAccessError::ComponentNotRegistered);
     };
@@ -203,6 +203,20 @@ pub enum EcsAccessLevel {
     ReadAll,
     /// Potentially writes all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
     WriteAll,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub enum ConstAccess {
+    /// Reads [`Component`](crate::prelude::Component) with [`ComponentId`]
+    Read(TypeId),
+    /// Writes [`Component`](crate::prelude::Component) with [`ComponentId`]
+    Write(TypeId),
+    /// Potentially reads all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
+    ReadAll,
+    /// Potentially writes all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
+    WriteAll,
+    /// Cannot Determine access at compile time
+    Unknown,
 }
 
 /// Error returned from [`EcsAccessType::is_compatible`]

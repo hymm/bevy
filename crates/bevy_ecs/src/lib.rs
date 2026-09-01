@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs, generic_const_items)]
 #![doc = include_str!("../README.md")]
 #![cfg_attr(
     any(docsrs, docsrs_dep),

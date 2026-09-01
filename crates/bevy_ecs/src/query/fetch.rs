@@ -9,8 +9,8 @@ use crate::{
     entity::{Entities, Entity, EntityLocation},
     query::{
         access_iter::{EcsAccessLevel, EcsAccessType},
-        Access, DebugCheckedUnwrap, FilteredAccess, FilteredAccessSet, QueryFilter, QueryState,
-        WorldQuery,
+        Access, ConstAccess, DebugCheckedUnwrap, FilteredAccess, FilteredAccessSet, QueryFilter,
+        QueryState, WorldQuery,
     },
     storage::{ComponentSparseSet, Table, TableRow},
     system::Query,
@@ -507,6 +507,9 @@ unsafe impl WorldQuery for Entity {
     type Fetch<'w> = ();
     type State = ();
 
+    const ACCESS_LEN: usize = 0;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [] where [(); Self::ACCESS_LEN]:;
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(_: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {}
 
     unsafe fn init_fetch<'w, 's>(
@@ -627,6 +630,9 @@ impl ContiguousQueryData for Entity {
 unsafe impl WorldQuery for EntityLocation {
     type Fetch<'w> = &'w Entities;
     type State = ();
+
+    const ACCESS_LEN: usize = 0;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [] where [(); Self::ACCESS_LEN]:;
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
@@ -817,6 +823,9 @@ unsafe impl WorldQuery for SpawnDetails {
     type Fetch<'w> = SpawnDetailsFetch<'w>;
     type State = ();
 
+    const ACCESS_LEN: usize = 0;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [] where [(); Self::ACCESS_LEN]:;
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -955,6 +964,9 @@ unsafe impl<'a> WorldQuery for EntityRef<'a> {
     type Fetch<'w> = EntityFetch<'w>;
     type State = ();
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::ReadAll];
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -1081,6 +1093,9 @@ unsafe impl<'a> WorldQuery for EntityMut<'a> {
     type Fetch<'w> = EntityFetch<'w>;
     type State = ();
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::WriteAll];
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -1203,6 +1218,10 @@ impl ArchetypeQueryData for EntityMut<'_> {}
 unsafe impl WorldQuery for FilteredEntityRef<'_, '_> {
     type Fetch<'w> = EntityFetch<'w>;
     type State = Access;
+
+    // TODO: This is probably wrong and should be considered only run time computable
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Unknown];
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
@@ -1345,6 +1364,9 @@ unsafe impl WorldQuery for FilteredEntityMut<'_, '_> {
     type Fetch<'w> = EntityFetch<'w>;
     type State = Access;
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Unknown];
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -1486,6 +1508,9 @@ where
     type Fetch<'w> = EntityFetch<'w>;
     type State = Access;
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Unknown] where [(); Self::ACCESS_LEN]:;
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -1619,6 +1644,9 @@ where
     type Fetch<'w> = EntityFetch<'w>;
     type State = Access;
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Unknown];
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -1746,6 +1774,10 @@ impl<B: Bundle> ArchetypeQueryData for EntityMutExcept<'_, '_, B> {}
 unsafe impl WorldQuery for &Archetype {
     type Fetch<'w> = (&'w Entities, &'w Archetypes);
     type State = ();
+
+    // TODO: This is wrong and we should only consider this to be run time computable
+    const ACCESS_LEN: usize = 0;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [];
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
@@ -1883,6 +1915,9 @@ impl<T: Component> Copy for ReadFetch<'_, T> {}
 unsafe impl<T: Component> WorldQuery for &T {
     type Fetch<'w> = ReadFetch<'w, T>;
     type State = ComponentId;
+
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Read(<T as Component>::TYPE_ID)]  where [(); Self::ACCESS_LEN]:;
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
@@ -2118,6 +2153,9 @@ impl<T: Component> Copy for RefFetch<'_, T> {}
 unsafe impl<'__w, T: Component> WorldQuery for Ref<'__w, T> {
     type Fetch<'w> = RefFetch<'w, T>;
     type State = ComponentId;
+
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Read(<T as Component>::TYPE_ID)]  where [(); Self::ACCESS_LEN]:;
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
@@ -2406,6 +2444,9 @@ unsafe impl<'__w, T: Component> WorldQuery for &'__w mut T {
     type Fetch<'w> = WriteFetch<'w, T>;
     type State = ComponentId;
 
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Write(<T as Component>::TYPE_ID)] where [(); Self::ACCESS_LEN]:;
+
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch
     }
@@ -2669,6 +2710,9 @@ impl<T: Component<Mutability = Mutable>> ContiguousQueryData for &mut T {
 unsafe impl<'__w, T: Component> WorldQuery for Mut<'__w, T> {
     type Fetch<'w> = WriteFetch<'w, T>;
     type State = ComponentId;
+
+    const ACCESS_LEN: usize = 1;
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = [ConstAccess::Write(<T as Component>::TYPE_ID)]  where [(); Self::ACCESS_LEN]:;
 
     fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
         fetch

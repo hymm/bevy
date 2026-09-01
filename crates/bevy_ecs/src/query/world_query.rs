@@ -2,7 +2,7 @@ use crate::{
     archetype::Archetype,
     change_detection::Tick,
     component::{ComponentId, Components},
-    query::{FilteredAccess, FilteredAccessSet},
+    query::{ConstAccess, EcsAccessLevel, FilteredAccess, FilteredAccessSet},
     storage::Table,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -86,6 +86,12 @@ pub unsafe trait WorldQuery {
     /// [`WorldQuery::set_archetype`] must be used before [`QueryData::fetch`](crate::query::QueryData::fetch) can be called for
     /// iterators.
     const IS_DENSE: bool;
+
+    /// length of CONST_ACCESs
+    const ACCESS_LEN: usize;
+
+    /// returns an iterator over the accesses of the world query
+    const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] where [(); Self::ACCESS_LEN]:;
 
     /// Adjusts internal state to account for the next [`Archetype`]. This will always be called on
     /// archetypes that match this [`WorldQuery`].
@@ -202,6 +208,12 @@ macro_rules! impl_tuple_world_query {
             }
 
             const IS_DENSE: bool = true $(&& $name::IS_DENSE)*;
+            const ACCESS_LEN: usize = 0 $(+ $name::ACCESS_LEN)*;
+            const CONST_ACCESS: [ConstAccess; Self::ACCESS_LEN] = {
+                let mut result = [ConstAccess::Unknown; Self::ACCESS_LEN];
+                // TODO: copy access from other types
+                result
+            } where [(); Self::ACCESS_LEN]:;
 
             #[inline]
             unsafe fn set_archetype<'w, 's>(
