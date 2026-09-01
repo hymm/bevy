@@ -157,6 +157,27 @@ pub unsafe trait WorldQuery {
     fn update_archetypes(state: &mut Self::State, world: UnsafeWorldCell);
 }
 
+/// TODO
+pub const trait WorldQueryConst {
+    /// TODO
+    fn iter_const_access() -> impl Iterator<Item = ConstAccess>;
+}
+
+/// TODO
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub enum ConstAccess {
+    /// Reads [`Component`](crate::prelude::Component) with [`ComponentId`]
+    Read(ComponentId),
+    /// Writes [`Component`](crate::prelude::Component) with [`ComponentId`]
+    Write(ComponentId),
+    /// Potentially reads all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
+    ReadAll,
+    /// Potentially writes all [`Component`](crate::prelude::Component)'s in the [`World`](crate::prelude::World)
+    WriteAll,
+    /// Unknown at compile time i.e. dynamic
+    Unknown,
+}
+
 macro_rules! impl_tuple_world_query {
     ($(#[$meta:meta])* $(($name: ident, $state: ident)),*) => {
 
