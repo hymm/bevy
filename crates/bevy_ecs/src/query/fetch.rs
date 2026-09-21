@@ -2172,7 +2172,11 @@ unsafe impl<'__w, T: Component> WorldQuery for Ref<'__w, T> {
             column
                 .get_changed_ticks_slice(table.entity_count() as usize)
                 .into(),
-            column.get_summary_tick(),
+            if T::HAS_SUMMARY_TICK {
+                column.get_summary_tick()
+            } else {
+                None
+            },
             column
                 .get_changed_by_slice(table.entity_count() as usize)
                 .map(Into::into),
@@ -2458,7 +2462,11 @@ unsafe impl<'__w, T: Component> WorldQuery for &'__w mut T {
             column
                 .get_changed_ticks_slice(table.entity_count() as usize)
                 .into(),
-            column.get_summary_tick(),
+            if T::HAS_SUMMARY_TICK {
+                column.get_summary_tick()
+            } else {
+                None
+            },
             column
                 .get_changed_by_slice(table.entity_count() as usize)
                 .map(Into::into),
