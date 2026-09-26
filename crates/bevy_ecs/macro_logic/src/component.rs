@@ -47,6 +47,8 @@ pub struct DeriveComponent {
     pub immutable: bool,
     /// Whether or not this component tracks a summary tick.
     pub summary_tick: bool,
+    /// Whether change detection is disabled for this component.
+    pub no_change_detection: bool,
     /// The clone behavior for this component.
     pub clone_behavior: Option<Expr>,
     /// The `map_entities` attribute information.
@@ -70,6 +72,7 @@ impl DeriveComponent {
             relationship_target: None,
             immutable: false,
             summary_tick: false,
+            no_change_detection: false,
             clone_behavior: None,
             map_entities: None,
             additional_requires: Vec::new(),
@@ -122,6 +125,9 @@ impl DeriveComponent {
                         Ok(())
                     } else if nested.path.is_ident(SUMMARY_TICK) {
                         attrs.summary_tick = true;
+                        Ok(())
+                    } else if nested.path.is_ident(NO_CHANGE_DETECTION) {
+                        attrs.no_change_detection = true;
                         Ok(())
                     } else if nested.path.is_ident(CLONE_BEHAVIOR) {
                         attrs.clone_behavior = Some(nested.value()?.parse()?);
@@ -233,6 +239,20 @@ impl DeriveComponent {
             }
         } else {
             quote! {}
+        };
+
+        let change_ticks = if self.summary_tick {
+            quote! {
+                #bevy_ecs::change_detection::ComponentTicksMutSumm
+            }
+        } else if self.no_change_detection {
+            quote! {
+                ()
+            }
+        } else {
+            quote! {
+                #bevy_ecs::change_detection::ComponentTicksMut
+            }
         };
 
         let storage = storage_path(bevy_ecs, self.storage.unwrap_or(default_storage));
@@ -361,6 +381,7 @@ impl DeriveComponent {
             impl #impl_generics #bevy_ecs::component::Component for #struct_name #type_generics #where_clause {
                 const STORAGE_TYPE: #bevy_ecs::component::StorageType = #storage;
                 type Mutability = #mutable_type;
+                type ChangeTicks<'w> = #change_ticks<'w>;
                 fn register_required_components(
                     _requiree: #bevy_ecs::component::ComponentId,
                     required_components: &mut #bevy_ecs::component::RequiredComponentsRegistrator,
@@ -533,6 +554,7 @@ const ON_DESPAWN: &str = "on_despawn";
 
 const IMMUTABLE: &str = "immutable";
 const SUMMARY_TICK: &str = "summary_tick";
+const NO_CHANGE_DETECTION: &str = "no_change_detection";
 const CLONE_BEHAVIOR: &str = "clone_behavior";
 
 /// All allowed attribute value expression kinds for component hooks.

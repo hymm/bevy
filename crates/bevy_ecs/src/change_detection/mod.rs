@@ -8,7 +8,7 @@ mod traits;
 pub use maybe_location::MaybeLocation;
 pub use params::*;
 pub use tick::*;
-pub use traits::{DetectChanges, DetectChangesMut};
+pub use traits::{ChangeTicksMut, DetectChanges, DetectChangesMut};
 
 /// The (arbitrarily chosen) minimum number of world tick increments between `check_tick` scans.
 ///
@@ -162,7 +162,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -216,7 +215,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -235,6 +233,7 @@ mod tests {
     #[test]
     fn map_mut() {
         use super::*;
+        #[derive(Component)]
         struct Outer(i64);
 
         let last_run = Tick::new(2);
@@ -251,7 +250,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run,
             this_run,
-            summary_tick: Some(&summary_tick),
         };
 
         let mut outer = Outer(0);

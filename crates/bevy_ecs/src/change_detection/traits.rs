@@ -1,6 +1,29 @@
-use crate::{change_detection::MaybeLocation, change_detection::Tick};
+use crate::change_detection::{AtomicTick, MaybeLocation, Tick};
 use alloc::borrow::ToOwned;
-use core::mem;
+use core::{mem, panic::Location};
+
+pub trait ChangeTicksMut<'w> {
+    fn new(
+        added: &'w mut Tick,
+        changed: &'w mut Tick,
+        summary_tick: Option<&'w AtomicTick>,
+        last_run: Tick,
+        this_run: Tick,
+        caller: MaybeLocation<&'w mut &'static Location<'static>>,
+    ) -> Self;
+
+    fn added(&self) -> Tick;
+    fn added_mut(&mut self) -> &mut Tick;
+    fn changed(&self) -> Tick;
+    fn changed_mut(&mut self) -> &mut Tick;
+    fn changed_by(&self) -> MaybeLocation;
+    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>>;
+    fn last_run(&self) -> Tick;
+    fn last_run_mut(&mut self) -> &mut Tick;
+    fn this_run(&self) -> Tick;
+    fn this_run_mut(&mut self) -> &mut Tick;
+    fn summary_tick(&self) -> Option<&AtomicTick>;
+}
 
 /// Types that can read change detection information.
 /// This change detection is controlled by [`DetectChangesMut`] types such as [`ResMut`].
@@ -369,51 +392,51 @@ macro_rules! change_detection_impl {
         impl<$($generics),* : ?Sized $(+ $traits)?> DetectChanges for $name<$($generics),*> {
             #[inline]
             fn is_added(&self) -> bool {
-                self.is_added_after(self.ticks.last_run)
+                self.is_added_after(self.ticks.last_run())
             }
 
             #[inline]
             fn is_changed(&self) -> bool {
-                self.is_changed_after(self.ticks.last_run)
+                self.is_changed_after(self.ticks.last_run())
             }
 
             #[inline]
              fn is_added_after(&self, other: Tick) -> bool {
                 self.ticks
-                    .added
-                    .is_newer_than(other, self.ticks.this_run)
+                    .added()
+                    .is_newer_than(other, self.ticks.this_run())
             }
 
             #[inline]
             fn is_changed_after(&self, other: Tick) -> bool {
                 self.ticks
-                    .changed
-                    .is_newer_than(other, self.ticks.this_run)
+                    .changed()
+                    .is_newer_than(other, self.ticks.this_run())
             }
 
             #[inline]
             fn last_changed(&self) -> Tick {
-                *self.ticks.changed
+                self.ticks.changed()
             }
 
             #[inline]
             fn added(&self) -> Tick {
-                *self.ticks.added
+                self.ticks.added()
             }
 
             #[inline]
             fn this_run(&self) -> Tick {
-                self.ticks.this_run
+                self.ticks.this_run()
             }
 
             #[inline]
             fn last_run(&self) -> Tick {
-                self.ticks.last_run
+                self.ticks.last_run()
             }
 
             #[inline]
             fn changed_by(&self) -> MaybeLocation {
-                self.ticks.changed_by.copied()
+                self.ticks.changed_by().copied().as_ref()
             }
         }
 
@@ -445,42 +468,42 @@ macro_rules! change_detection_mut_impl {
             #[inline]
             #[track_caller]
             fn set_changed(&mut self) {
-                *self.ticks.changed = self.ticks.this_run;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                *self.ticks.changed_mut() = self.ticks.this_run();
+                self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                if let Some(summary_tick) = self.ticks.summary_tick() {
+                    summary_tick.set(self.ticks.this_run());
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_added(&mut self) {
-                *self.ticks.changed = self.ticks.this_run;
-                *self.ticks.added = self.ticks.this_run;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                *self.ticks.changed_mut() = self.ticks.this_run();
+                *self.ticks.added_mut() = self.ticks.this_run();
+                self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                if let Some(summary_tick) = self.ticks.summary_tick() {
+                    summary_tick.set(self.ticks.this_run());
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_last_changed(&mut self, last_changed: Tick) {
-                *self.ticks.changed = last_changed;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                *self.ticks.changed_mut() = last_changed;
+                self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                if let Some(summary_tick) = self.ticks.summary_tick() {
+                    summary_tick.set(self.ticks.this_run());
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_last_added(&mut self, last_added: Tick) {
-                *self.ticks.added = last_added;
-                *self.ticks.changed = last_added;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                *self.ticks.added_mut() = last_added;
+                *self.ticks.changed_mut() = last_added;
+                self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                if let Some(summary_tick) = self.ticks.summary_tick() {
+                    summary_tick.set(self.ticks.this_run());
                 }
             }
 
@@ -495,7 +518,7 @@ macro_rules! change_detection_mut_impl {
             #[track_caller]
             fn deref_mut(&mut self) -> &mut Self::Target {
                 self.set_changed();
-                self.ticks.changed_by.assign(MaybeLocation::caller());
+                self.ticks.changed_by_mut().assign(MaybeLocation::caller());
                 self.value
             }
         }
@@ -527,17 +550,15 @@ macro_rules! impl_methods {
             #[doc = stringify!($name)]
             /// <T>`, but you need a `Mut<T>`.
             pub fn reborrow(&mut self) -> Mut<'_, $target> {
-                Mut {
-                    value: self.value,
-                    ticks: ComponentTicksMut {
-                        added: self.ticks.added,
-                        changed: self.ticks.changed,
-                        changed_by: self.ticks.changed_by.as_deref_mut(),
-                        last_run: self.ticks.last_run,
-                        this_run: self.ticks.this_run,
-                        summary_tick: self.ticks.summary_tick,
-                    },
-                }
+                Mut::new(
+                    self.value,
+                    self.ticks.added_mut(),
+                    self.ticks.changed_mut(),
+                    self.ticks.summary_tick(),
+                    self.ticks.last_run(),
+                    self.ticks.this_run(),
+                    self.ticks.changed_by_mut().as_deref_mut(),
+                )
             }
 
             /// Maps to an inner value by applying a function to the contained reference, without flagging a change.
@@ -562,10 +583,11 @@ macro_rules! impl_methods {
             /// }
             /// # bevy_ecs::system::assert_is_system(reset_positions);
             /// ```
-            pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut $target) -> &mut U) -> Mut<'w, U> {
+            pub fn map_unchanged<U: ?Sized + Component<ChangeTicks<'w> = T::ChangeTicks<'w>>>(self, f: impl FnOnce(&mut $target) -> &mut U) -> Mut<'w, U> {
+                let (mut value, ticks) = self.into_value_ticks();
                 Mut {
-                    value: f(self.value),
-                    ticks: self.ticks,
+                    value: f(value),
+                    ticks,
                 }
             }
 
@@ -573,11 +595,15 @@ macro_rules! impl_methods {
             /// This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`.
             ///
             /// As with `map_unchanged`, you should never modify the argument passed to the closure.
-            pub fn filter_map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut $target) -> Option<&mut U>) -> Option<Mut<'w, U>> {
+            /// }
+            /// # bevy_ecs::system::assert_is_system(reset_positions);
+            /// ```
+            pub fn filter_map_unchanged<U: ?Sized + Component<ChangeTicks<'w> = T::ChangeTicks<'w>>>(self, f: impl FnOnce(&mut $target) -> Option<&mut U>) -> Option<Mut<'w, U>> {
+                let (mut value, ticks) = self.into_value_ticks();
                 let value = f(self.value);
                 value.map(|value| Mut {
                     value,
-                    ticks: self.ticks,
+                    ticks,
                 })
             }
 
@@ -585,7 +611,7 @@ macro_rules! impl_methods {
             /// This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`.
             ///
             /// As with `map_unchanged`, you should never modify the argument passed to the closure.
-            pub fn try_map_unchanged<U: ?Sized, E>(self, f: impl FnOnce(&mut $target) -> Result<&mut U, E>) -> Result<Mut<'w, U>, E> {
+            pub fn try_map_unchanged<U: ?Sized + Component, E>(self, f: impl FnOnce(&mut $target) -> Result<&mut U, E>) -> Result<Mut<'w, U>, E> {
                 let value = f(self.value);
                 value.map(|value| Mut {
                     value,
@@ -600,7 +626,6 @@ macro_rules! impl_methods {
             {
                 self.reborrow().map_unchanged(|v| v.deref_mut())
             }
-
         }
     };
 }

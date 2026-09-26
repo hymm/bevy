@@ -2,8 +2,9 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundle,
     change_detection::{
-        AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
-        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
+        AtomicTick, ChangeTicksMut, ComponentTicksMut, ComponentTicksRef,
+        ContiguousComponentTicksMut, ContiguousComponentTicksRef, ContiguousMut, ContiguousRef,
+        MaybeLocation, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -2546,14 +2547,14 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
 
                 Mut {
                     value: component.deref_mut(),
-                    ticks: ComponentTicksMut {
-                        added: added.deref_mut(),
-                        changed: changed.deref_mut(),
-                        changed_by: caller.map(|caller| caller.deref_mut()),
-                        this_run: fetch.this_run,
-                        last_run: fetch.last_run,
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut<'w>>::new(
+                        added.deref_mut(),
+                        changed.deref_mut(),
                         summary_tick,
-                    },
+                        fetch.last_run,
+                        fetch.this_run,
+                        caller.map(|caller| caller.deref_mut()),
+                    ),
                 }
             },
             |sparse_set| {
@@ -2567,10 +2568,13 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
 
                 Mut {
                     value: component.assert_unique().deref_mut(),
-                    ticks: ComponentTicksMut::from_tick_cells(
-                        ticks,
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut<'w>>::new(
+                        ticks.added.as_mut_unchecked(),
+                        ticks.changed.as_mut_unchecked(),
+                        ticks.summary_tick,
                         fetch.last_run,
                         fetch.this_run,
+                        ticks.changed_by.map(|changed_by| changed_by.deref_mut()),
                     ),
                 }
             },

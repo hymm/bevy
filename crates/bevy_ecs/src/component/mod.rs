@@ -13,6 +13,7 @@ pub use register::*;
 pub use required::*;
 
 use crate::{
+    change_detection::ChangeTicksMut,
     entity::EntityMapper,
     lifecycle::ComponentHook,
     relationship::ComponentRelationshipAccessor,
@@ -538,6 +539,11 @@ pub trait Component: Send + Sync + 'static {
     /// * For a component to be mutable, this type must be [`Mutable`].
     /// * For a component to be immutable, this type must be [`Immutable`].
     type Mutability: ComponentMutability;
+
+    /// Changes the ticks returned by [`Mut`].
+    ///
+    /// Set to the empty tuple `()` to disable change ticks.
+    type ChangeTicks<'w>: ChangeTicksMut<'w>;
 
     /// Gets the `on_add` [`ComponentHook`] for this [`Component`] if one is defined.
     fn on_add() -> Option<ComponentHook> {
