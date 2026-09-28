@@ -19,4 +19,5 @@ criterion_group!(
     schedule,
     build_schedule,
     empty_schedule_run,
+    alternate_regular_exclusive_system,
 );

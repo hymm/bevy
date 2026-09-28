@@ -1,4 +1,10 @@
-use bevy_ecs::{component::Component, schedule::Schedule, system::Query, world::World};
+use bevy_ecs::{
+    component::Component,
+    query::QueryState,
+    schedule::Schedule,
+    system::{IntoSystem, Query, System},
+    world::World,
+};
 use criterion::Criterion;
 
 #[derive(Component)]
@@ -134,5 +140,34 @@ pub fn contrived(criterion: &mut Criterion) {
             );
         }
     }
+    group.finish();
+}
+
+pub fn alternate_regular_exclusive_system(criterion: &mut Criterion) {
+    fn s_0(mut q_0: Query<(&mut A, &mut B)>) {
+        q_0.iter_mut().for_each(|(mut c_0, mut c_1)| {
+            core::mem::swap(&mut c_0.0, &mut c_1.0);
+        });
+    }
+    fn s_2(world: &mut World, q_0: &mut QueryState<(&mut C, &mut D)>) {
+        q_0.iter_mut(world).for_each(|(mut c_0, mut c_1)| {
+            core::mem::swap(&mut c_0.0, &mut c_1.0);
+        });
+    }
+    let mut world = World::new();
+    let mut group = criterion.benchmark_group("contrived");
+    group.warm_up_time(core::time::Duration::from_millis(500));
+    group.measurement_time(core::time::Duration::from_secs(3));
+
+    let mut system = IntoSystem::into_system(s_0);
+    let mut exclusive_system = IntoSystem::into_system(s_2);
+
+    group.bench_function("alternate_regular_exclusive_system", |bencher| {
+        bencher.iter(|| {
+            let _ = system.run((), &mut world);
+            let _ = exclusive_system.run((), &mut world);
+        });
+    });
+
     group.finish();
 }
