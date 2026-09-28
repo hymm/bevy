@@ -1,6 +1,36 @@
-use crate::{change_detection::MaybeLocation, change_detection::Tick};
+use crate::change_detection::{AtomicTick, ComponentTicksMut, MaybeLocation, Tick};
 use alloc::borrow::ToOwned;
-use core::mem;
+use core::{mem, panic::Location};
+
+pub trait ChangeTicksMut<'w> {
+    fn new(
+        added: &'w mut Tick,
+        changed: &'w mut Tick,
+        summary_tick: Option<&'w AtomicTick>,
+        last_run: Tick,
+        this_run: Tick,
+        caller: MaybeLocation<&'w mut &'static Location<'static>>,
+    ) -> Self;
+
+    fn reborrow(&mut self) -> ComponentTicksMut<'_>;
+    fn added(&self) -> Tick;
+    fn added_mut(&mut self) -> &mut Tick;
+    fn changed(&self) -> Tick;
+    fn changed_mut(&mut self) -> &mut Tick;
+    fn changed_by(&self) -> MaybeLocation;
+    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>>;
+    fn last_run(&self) -> Tick;
+    fn last_run_mut(&mut self) -> &mut Tick;
+    fn this_run(&self) -> Tick;
+    fn this_run_mut(&mut self) -> &mut Tick;
+    fn summary_tick(&self) -> Option<&AtomicTick>;
+}
+
+pub trait Shrinkable {
+    type Item<'w>;
+
+    fn shrink<'long: 'short, 'short>(item: Self::Item<'long>) -> Self::Item<'short>;
+}
 
 /// Types that can read change detection information.
 /// This change detection is controlled by [`DetectChangesMut`] types such as [`ResMut`].
@@ -447,9 +477,6 @@ macro_rules! change_detection_mut_impl {
             fn set_changed(&mut self) {
                 *self.ticks.changed = self.ticks.this_run;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -458,9 +485,6 @@ macro_rules! change_detection_mut_impl {
                 *self.ticks.changed = self.ticks.this_run;
                 *self.ticks.added = self.ticks.this_run;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -468,9 +492,6 @@ macro_rules! change_detection_mut_impl {
             fn set_last_changed(&mut self, last_changed: Tick) {
                 *self.ticks.changed = last_changed;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -479,9 +500,6 @@ macro_rules! change_detection_mut_impl {
                 *self.ticks.added = last_added;
                 *self.ticks.changed = last_added;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -535,7 +553,6 @@ macro_rules! impl_methods {
                         changed_by: self.ticks.changed_by.as_deref_mut(),
                         last_run: self.ticks.last_run,
                         this_run: self.ticks.this_run,
-                        summary_tick: self.ticks.summary_tick,
                     },
                 }
             }

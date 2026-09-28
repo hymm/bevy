@@ -831,7 +831,7 @@ mod tests {
             .cloned();
 
         // With `iter_many_mut` collecting is not possible, because you need to drop each `Mut`/`&mut` before the next is retrieved.
-        let _results: Vec<Mut<Thing>> = query
+        let _results: Vec<_> = query
             .iter_many_unique_mut(&mut world, entity_set)
             .unwrapped()
             .collect();
