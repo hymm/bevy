@@ -1,6 +1,6 @@
 use crate::{
     change_detection::{traits::*, AtomicTick, ComponentTickCells, MaybeLocation, Tick},
-    component::Mutable,
+    component::{Component, Mutable},
     ptr::PtrMut,
     resource::Resource,
 };
@@ -247,7 +247,124 @@ impl<'w> ContiguousComponentTicksRef<'w> {
 
 /// Used by mutable query parameters (such as [`Mut`] and [`ResMut`])
 /// to store mutable access to the [`Tick`]s of a single component or resource.
-pub(crate) struct ComponentTicksMut<'w> {
+pub struct ComponentTicksMut<'w> {
+    pub(crate) added: &'w mut Tick,
+    pub(crate) changed: &'w mut Tick,
+    pub(crate) changed_by: MaybeLocation<&'w mut &'static Location<'static>>,
+    pub(crate) last_run: Tick,
+    pub(crate) this_run: Tick,
+}
+
+impl<'w> ComponentTicksMut<'w> {
+    /// # Safety
+    /// This should never alias the underlying ticks. All access must be unique.
+    #[inline]
+    pub(crate) unsafe fn from_tick_cells(
+        cells: ComponentTickCells<'w>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> Self {
+        Self {
+            // SAFETY: Caller ensures there is no alias to the cell.
+            added: unsafe { cells.added.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed: unsafe { cells.changed.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed_by: unsafe { cells.changed_by.map(|changed_by| changed_by.deref_mut()) },
+            last_run,
+            this_run,
+        }
+    }
+}
+
+impl<'w> ChangeTicksMut<'w> for ComponentTicksMut<'w> {
+    fn new(
+        added: &'w mut Tick,
+        changed: &'w mut Tick,
+        summary_tick: Option<&'w AtomicTick>,
+        last_run: Tick,
+        this_run: Tick,
+        caller: MaybeLocation<&'w mut &'static Location<'static>>,
+    ) -> Self {
+        Self {
+            added,
+            changed,
+            changed_by: caller,
+            last_run,
+            this_run,
+        }
+    }
+
+    fn reborrow(&mut self) -> ComponentTicksMut<'_> {
+        ComponentTicksMut {
+            added: self.added,
+            changed: self.changed,
+            changed_by: self.changed_by.as_deref_mut(),
+            last_run: self.last_run,
+            this_run: self.this_run,
+        }
+    }
+
+    fn added_mut(&mut self) -> &mut Tick {
+        self.added
+    }
+
+    fn changed_mut(&mut self) -> &mut Tick {
+        self.changed
+    }
+
+    fn changed_by(&self) -> MaybeLocation<&'static Location<'static>> {
+        self.changed_by.copied()
+    }
+
+    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>> {
+        self.changed_by.as_deref_mut()
+    }
+
+    fn last_run_mut(&mut self) -> &mut Tick {
+        &mut self.last_run
+    }
+
+    fn this_run_mut(&mut self) -> &mut Tick {
+        &mut self.this_run
+    }
+
+    fn added(&self) -> Tick {
+        *self.added
+    }
+
+    fn changed(&self) -> Tick {
+        *self.changed
+    }
+
+    fn last_run(&self) -> Tick {
+        self.last_run
+    }
+
+    fn this_run(&self) -> Tick {
+        self.this_run
+    }
+
+    fn summary_tick(&self) -> Option<&AtomicTick> {
+        None
+    }
+}
+
+impl<'w> From<ComponentTicksMut<'w>> for ComponentTicksRef<'w> {
+    fn from(ticks: ComponentTicksMut<'w>) -> Self {
+        ComponentTicksRef {
+            added: ticks.added,
+            changed: ticks.changed,
+            changed_by: ticks.changed_by.map(|changed_by| &*changed_by),
+            last_run: ticks.last_run,
+            this_run: ticks.this_run,
+        }
+    }
+}
+
+/// Used by mutable query parameters (such as [`Mut`] and [`ResMut`])
+/// to store mutable access to the [`Tick`]s of a single component or resource.
+pub(crate) struct ComponentTicksMutSumm<'w> {
     pub(crate) added: &'w mut Tick,
     pub(crate) changed: &'w mut Tick,
     pub(crate) changed_by: MaybeLocation<&'w mut &'static Location<'static>>,
@@ -258,7 +375,7 @@ pub(crate) struct ComponentTicksMut<'w> {
     pub(crate) summary_tick: Option<&'w AtomicTick>,
 }
 
-impl<'w> ComponentTicksMut<'w> {
+impl<'w> ComponentTicksMutSumm<'w> {
     /// # Safety
     /// This should never alias the underlying ticks. All access must be unique.
     #[inline]
@@ -281,8 +398,82 @@ impl<'w> ComponentTicksMut<'w> {
     }
 }
 
-impl<'w> From<ComponentTicksMut<'w>> for ComponentTicksRef<'w> {
-    fn from(ticks: ComponentTicksMut<'w>) -> Self {
+impl<'w> ChangeTicksMut<'w> for ComponentTicksMutSumm<'w> {
+    fn new(
+        added: &'w mut Tick,
+        changed: &'w mut Tick,
+        summary_tick: Option<&'w AtomicTick>,
+        last_run: Tick,
+        this_run: Tick,
+        caller: MaybeLocation<&'w mut &'static Location<'static>>,
+    ) -> Self {
+        Self {
+            added,
+            changed,
+            changed_by: caller,
+            last_run,
+            this_run,
+            summary_tick,
+        }
+    }
+
+    fn reborrow(&mut self) -> ComponentTicksMut<'_> {
+        ComponentTicksMut {
+            added: self.added,
+            changed: self.changed,
+            changed_by: self.changed_by.as_deref_mut(),
+            last_run: self.last_run,
+            this_run: self.this_run,
+        }
+    }
+
+    fn added_mut(&mut self) -> &mut Tick {
+        self.added
+    }
+
+    fn changed_mut(&mut self) -> &mut Tick {
+        self.changed
+    }
+
+    fn changed_by(&self) -> MaybeLocation<&'static Location<'static>> {
+        self.changed_by.copied()
+    }
+
+    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>> {
+        self.changed_by.as_deref_mut()
+    }
+
+    fn last_run_mut(&mut self) -> &mut Tick {
+        &mut self.last_run
+    }
+
+    fn this_run_mut(&mut self) -> &mut Tick {
+        &mut self.this_run
+    }
+
+    fn added(&self) -> Tick {
+        *self.added
+    }
+
+    fn changed(&self) -> Tick {
+        *self.changed
+    }
+
+    fn last_run(&self) -> Tick {
+        self.last_run
+    }
+
+    fn this_run(&self) -> Tick {
+        self.this_run
+    }
+
+    fn summary_tick(&self) -> Option<&AtomicTick> {
+        self.summary_tick
+    }
+}
+
+impl<'w> From<ComponentTicksMutSumm<'w>> for ComponentTicksRef<'w> {
+    fn from(ticks: ComponentTicksMutSumm<'w>) -> Self {
         ComponentTicksRef {
             added: ticks.added,
             changed: ticks.changed,
@@ -1054,7 +1245,7 @@ impl<'w, T: ?Sized> Mut<'w, T> {
         value: &'w mut T,
         added: &'w mut Tick,
         last_changed: &'w mut Tick,
-        summary_tick: Option<&'w AtomicTick>,
+        _summary_tick: Option<&'w AtomicTick>,
         last_run: Tick,
         this_run: Tick,
         caller: MaybeLocation<&'w mut &'static Location<'static>>,
@@ -1067,7 +1258,6 @@ impl<'w, T: ?Sized> Mut<'w, T> {
                 changed_by: caller,
                 last_run,
                 this_run,
-                summary_tick,
             },
         }
     }
@@ -1081,6 +1271,256 @@ impl<'w, T: ?Sized> Mut<'w, T> {
         self.ticks.this_run = this_run;
     }
 }
+
+impl<'w, T: ?Sized> From<Mut<'w, T>> for Ref<'w, T> {
+    fn from(mut_ref: Mut<'w, T>) -> Self {
+        Self {
+            value: mut_ref.value,
+            ticks: mut_ref.ticks.into(),
+        }
+    }
+}
+
+impl<'w, 'a, T> IntoIterator for &'a Mut<'w, T>
+where
+    &'a T: IntoIterator,
+{
+    type Item = <&'a T as IntoIterator>::Item;
+    type IntoIter = <&'a T as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.value.into_iter()
+    }
+}
+
+impl<'w, 'a, T> IntoIterator for &'a mut Mut<'w, T>
+where
+    &'a mut T: IntoIterator,
+{
+    type Item = <&'a mut T as IntoIterator>::Item;
+    type IntoIter = <&'a mut T as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.set_changed();
+        self.value.into_iter()
+    }
+}
+
+change_detection_impl!(Mut<'w, T>, T,);
+change_detection_mut_impl!(Mut<'w, T>, T,);
+impl_methods!(Mut<'w, T>, T,);
+impl_debug!(Mut<'w, T>,);
+
+pub struct MutComp<'w, T: ?Sized + Component> {
+    pub(crate) value: &'w mut T,
+    pub(crate) ticks: T::ChangeTicks<'w>,
+}
+
+impl<'w, T: ?Sized + Component> DetectChanges for MutComp<'w, T> {
+    #[inline]
+    fn is_added(&self) -> bool {
+        self.is_added_after(self.ticks.last_run())
+    }
+    #[inline]
+    fn is_changed(&self) -> bool {
+        self.is_changed_after(self.ticks.last_run())
+    }
+    #[inline]
+    fn is_added_after(&self, other: Tick) -> bool {
+        self.ticks
+            .added()
+            .is_newer_than(other, self.ticks.this_run())
+    }
+    #[inline]
+    fn is_changed_after(&self, other: Tick) -> bool {
+        self.ticks
+            .changed()
+            .is_newer_than(other, self.ticks.this_run())
+    }
+    #[inline]
+    fn last_changed(&self) -> Tick {
+        self.ticks.changed()
+    }
+    #[inline]
+    fn added(&self) -> Tick {
+        self.ticks.added()
+    }
+    #[inline]
+    fn this_run(&self) -> Tick {
+        self.ticks.this_run()
+    }
+    #[inline]
+    fn last_run(&self) -> Tick {
+        self.ticks.last_run()
+    }
+    #[inline]
+    fn changed_by(&self) -> MaybeLocation {
+        self.ticks.changed_by()
+    }
+}
+impl<'w, T: ?Sized + Component> Deref for MutComp<'w, T> {
+    type Target = T;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.value
+    }
+}
+impl<'w, T: Component> AsRef<T> for MutComp<'w, T> {
+    #[inline]
+    fn as_ref(&self) -> &T {
+        self.deref()
+    }
+}
+impl<'w, T: ?Sized + Component> DetectChangesMut for MutComp<'w, T> {
+    type Inner = T;
+    #[inline]
+    #[track_caller]
+    fn set_changed(&mut self) {
+        *self.ticks.changed_mut() = self.ticks.this_run();
+        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick() {
+            summary_tick.set(self.ticks.this_run());
+        }
+    }
+    #[inline]
+    #[track_caller]
+    fn set_added(&mut self) {
+        *self.ticks.changed_mut() = self.ticks.this_run();
+        *self.ticks.added_mut() = self.ticks.this_run();
+        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick() {
+            summary_tick.set(self.ticks.this_run());
+        }
+    }
+    #[inline]
+    #[track_caller]
+    fn set_last_changed(&mut self, last_changed: Tick) {
+        *self.ticks.changed_mut() = last_changed;
+        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick() {
+            summary_tick.set(last_changed);
+        }
+    }
+    #[inline]
+    #[track_caller]
+    fn set_last_added(&mut self, last_added: Tick) {
+        *self.ticks.added_mut() = last_added;
+        *self.ticks.changed_mut() = last_added;
+        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick() {
+            summary_tick.set(last_added);
+        }
+    }
+    #[inline]
+    fn bypass_change_detection(&mut self) -> &mut Self::Inner {
+        self.value
+    }
+}
+impl<'w, T: ?Sized + Component> DerefMut for MutComp<'w, T> {
+    #[inline]
+    #[track_caller]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.set_changed();
+        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        self.value
+    }
+}
+impl<'w, T: ?Sized + Component> AsMut<T> for MutComp<'w, T> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut T {
+        self.deref_mut()
+    }
+}
+
+impl<'w, T: ?Sized + Component> MutComp<'w, T> {
+    #[doc = r" Consume `self` and return a mutable reference to the"]
+    #[doc = r#" contained value while marking `self` as "changed"."#]
+    #[inline]
+    pub fn into_inner(mut self) -> &'w mut T {
+        self.set_changed();
+        self.value
+    }
+}
+impl<'w, T: ?Sized + Component> MutComp<'w, T>
+where
+    for<'a> T: Component<ChangeTicks<'a> = ComponentTicksMut<'a>>,
+{
+    #[doc = r" Returns a `Mut<>` with a smaller lifetime."]
+    #[doc = r" This is useful if you have `&mut"]
+    #[doc = "MutComp"]
+    #[doc = r" <T>`, but you need a `Mut<T>`."]
+    pub fn reborrow(&mut self) -> MutComp<'_, T> {
+        MutComp {
+            value: self.value,
+            ticks: self.ticks.reborrow(),
+        }
+    }
+    #[doc = r" Maps to an inner value by applying a function to the contained reference, without flagging a change."]
+    #[doc = r""]
+    #[doc = r" You should never modify the argument passed to the closure -- if you want to modify the data"]
+    #[doc = r" without flagging a change, consider using [`DetectChangesMut::bypass_change_detection`] to make your intent explicit."]
+    #[doc = r""]
+    #[doc = r" ```"]
+    #[doc = r" # use bevy_ecs::prelude::*;"]
+    #[doc = r" # #[derive(PartialEq)] pub struct Vec2;"]
+    #[doc = r" # impl Vec2 { pub const ZERO: Self = Self; }"]
+    #[doc = r" # #[derive(Component)] pub struct Transform { translation: Vec2 }"]
+    #[doc = r" // When run, zeroes the translation of every entity."]
+    #[doc = r" fn reset_positions(mut transforms: Query<&mut Transform>) {"]
+    #[doc = r"     for transform in &mut transforms {"]
+    #[doc = r"         // We pinky promise not to modify `t` within the closure."]
+    #[doc = r"         // Breaking this promise will result in logic errors, but will never cause undefined behavior."]
+    #[doc = r"         let mut translation = transform.map_unchanged(|t| &mut t.translation);"]
+    #[doc = r"         // Only reset the translation if it isn't already zero;"]
+    #[doc = r"         translation.set_if_neq(Vec2::ZERO);"]
+    #[doc = r"     }"]
+    #[doc = r" }"]
+    #[doc = r" # bevy_ecs::system::assert_is_system(reset_positions);"]
+    #[doc = r" ```"]
+    pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut T) -> &mut U) -> Mut<'w, U> {
+        Mut {
+            value: f(self.value),
+            ticks: self.ticks.into(),
+        }
+    }
+    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference."]
+    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
+    #[doc = r""]
+    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
+    pub fn filter_map_unchanged<U: ?Sized>(
+        self,
+        f: impl FnOnce(&mut T) -> Option<&mut U>,
+    ) -> Option<Mut<'w, U>> {
+        let value = f(self.value);
+        value.map(|value| Mut {
+            value,
+            ticks: self.ticks.into(),
+        })
+    }
+    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference, returns an error on failure."]
+    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
+    #[doc = r""]
+    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
+    pub fn try_map_unchanged<U: ?Sized, E>(
+        self,
+        f: impl FnOnce(&mut T) -> Result<&mut U, E>,
+    ) -> Result<Mut<'w, U>, E> {
+        let value = f(self.value);
+        value.map(|value| Mut {
+            value,
+            ticks: self.ticks.into(),
+        })
+    }
+    #[doc = r" Allows you access to the dereferenced value of this pointer without immediately"]
+    #[doc = r" triggering change detection."]
+    pub fn as_deref_mut(&mut self) -> Mut<'_, <T as Deref>::Target>
+    where
+        T: DerefMut,
+    {
+        self.reborrow().map_unchanged(|v| v.deref_mut())
+    }
+}
+impl_debug!(MutComp<'w, T>, Component);
 
 /// Data type returned by [`ContiguousQueryData::fetch_contiguous`](crate::query::ContiguousQueryData::fetch_contiguous)
 /// for [`Mut<T>`] and `&mut T`
@@ -1328,45 +1768,6 @@ impl<'w, T> From<ContiguousMut<'w, T>> for ContiguousRef<'w, T> {
     }
 }
 
-impl<'w, T: ?Sized> From<Mut<'w, T>> for Ref<'w, T> {
-    fn from(mut_ref: Mut<'w, T>) -> Self {
-        Self {
-            value: mut_ref.value,
-            ticks: mut_ref.ticks.into(),
-        }
-    }
-}
-
-impl<'w, 'a, T> IntoIterator for &'a Mut<'w, T>
-where
-    &'a T: IntoIterator,
-{
-    type Item = <&'a T as IntoIterator>::Item;
-    type IntoIter = <&'a T as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.value.into_iter()
-    }
-}
-
-impl<'w, 'a, T> IntoIterator for &'a mut Mut<'w, T>
-where
-    &'a mut T: IntoIterator,
-{
-    type Item = <&'a mut T as IntoIterator>::Item;
-    type IntoIter = <&'a mut T as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.set_changed();
-        self.value.into_iter()
-    }
-}
-
-change_detection_impl!(Mut<'w, T>, T,);
-change_detection_mut_impl!(Mut<'w, T>, T,);
-impl_methods!(Mut<'w, T>, T,);
-impl_debug!(Mut<'w, T>,);
-
 /// Unique mutable borrow of resources or an entity's component.
 ///
 /// Similar to [`Mut`], but not generic over the component type, instead
@@ -1402,7 +1803,6 @@ impl<'w> MutUntyped<'w> {
                 changed_by: self.ticks.changed_by.as_deref_mut(),
                 last_run: self.ticks.last_run,
                 this_run: self.ticks.this_run,
-                summary_tick: self.ticks.summary_tick,
             },
         }
     }

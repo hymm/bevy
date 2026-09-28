@@ -8,7 +8,7 @@ mod traits;
 pub use maybe_location::MaybeLocation;
 pub use params::*;
 pub use tick::*;
-pub use traits::{DetectChanges, DetectChangesMut};
+pub use traits::{ChangeTicksMut, DetectChanges, DetectChangesMut};
 
 /// The (arbitrarily chosen) minimum number of world tick increments between `check_tick` scans.
 ///
@@ -155,14 +155,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -209,14 +207,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -251,7 +247,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run,
             this_run,
-            summary_tick: Some(&summary_tick),
         };
 
         let mut outer = Outer(0);
@@ -341,7 +336,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run,
             this_run,
-            summary_tick: Some(&summary_tick),
         };
 
         let mut value: i32 = 5;
@@ -379,7 +373,6 @@ mod tests {
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut c = C {};
 

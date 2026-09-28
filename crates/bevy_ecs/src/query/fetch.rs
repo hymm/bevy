@@ -2,8 +2,9 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundle,
     change_detection::{
-        AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
-        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
+        AtomicTick, ChangeTicksMut, ComponentTicksMut, ComponentTicksRef,
+        ContiguousComponentTicksMut, ContiguousComponentTicksRef, ContiguousMut, ContiguousRef,
+        MaybeLocation, MutComp, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -2506,12 +2507,12 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = &'__w T;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = MutComp<'w, T>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
     ) -> Self::Item<'wshort, 's> {
-        item
+        <T as Component>::shrink(item)
     }
 
     #[inline(always)]
@@ -2544,16 +2545,16 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
                     None
                 };
 
-                Mut {
+                MutComp {
                     value: component.deref_mut(),
-                    ticks: ComponentTicksMut {
-                        added: added.deref_mut(),
-                        changed: changed.deref_mut(),
-                        changed_by: caller.map(|caller| caller.deref_mut()),
-                        this_run: fetch.this_run,
-                        last_run: fetch.last_run,
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut>::new(
+                        added.deref_mut(),
+                        changed.deref_mut(),
                         summary_tick,
-                    },
+                        fetch.last_run,
+                        fetch.this_run,
+                        caller.map(|caller| caller.deref_mut()),
+                    ),
                 }
             },
             |sparse_set| {
@@ -2565,12 +2566,15 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
                         .debug_checked_unwrap()
                 };
 
-                Mut {
+                MutComp {
                     value: component.assert_unique().deref_mut(),
-                    ticks: ComponentTicksMut::from_tick_cells(
-                        ticks,
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut>::new(
+                        ticks.added.deref_mut(),
+                        ticks.changed.deref_mut(),
+                        ticks.summary_tick,
                         fetch.last_run,
                         fetch.this_run,
+                        ticks.changed_by.map(|caller| caller.deref_mut()),
                     ),
                 }
             },
@@ -2737,7 +2741,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T>
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Ref<'__w, T>;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = MutComp<'w, T>;
 
     // Forwarded to `&mut T`
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
