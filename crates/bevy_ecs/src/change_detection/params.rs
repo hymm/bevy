@@ -1097,12 +1097,7 @@ impl<'w> ComponentTicksMut2<'w> {
     /// * Mutating the wrapped value while the returned reference is alive is Undefined Behavior.
     unsafe fn added(&self) -> Tick {
         // Safety is upheld by the caller
-        unsafe {
-            *self
-                .column
-                .get_added_tick_unchecked(self.index)
-                .as_ref_unchecked()
-        }
+        unsafe { *self.column.get_added_tick_unchecked(self.index).get() }
     }
 
     /// Safety:
@@ -1111,11 +1106,7 @@ impl<'w> ComponentTicksMut2<'w> {
     /// * Mutating the wrapped value through other means while the returned reference is alive is Undefined Behavior.
     unsafe fn added_mut(&mut self) -> &mut Tick {
         // Safety is upheld by the caller
-        unsafe {
-            self.column
-                .get_added_tick_unchecked(self.index)
-                .as_mut_unchecked()
-        }
+        unsafe { &mut *self.column.get_added_tick_unchecked(self.index).get() }
     }
 
     /// Safety:
@@ -1124,12 +1115,7 @@ impl<'w> ComponentTicksMut2<'w> {
     /// * Mutating the wrapped value through other means while the returned reference is alive is Undefined Behavior.
     unsafe fn changed(&self) -> Tick {
         // Safety is upheld by the caller
-        unsafe {
-            *self
-                .column
-                .get_changed_tick_unchecked(self.index)
-                .as_ref_unchecked()
-        }
+        unsafe { *self.column.get_changed_tick_unchecked(self.index).get() }
     }
 
     /// Safety:
@@ -1138,11 +1124,7 @@ impl<'w> ComponentTicksMut2<'w> {
     /// * Mutating the wrapped value through other means while the returned reference is alive is Undefined Behavior.
     unsafe fn changed_mut(&mut self) -> &mut Tick {
         // Safety is upheld by the caller
-        unsafe {
-            self.column
-                .get_changed_tick_unchecked(self.index)
-                .as_mut_unchecked()
-        }
+        unsafe { &mut *self.column.get_changed_tick_unchecked(self.index).get() }
     }
 
     /// Safety:
@@ -1154,7 +1136,7 @@ impl<'w> ComponentTicksMut2<'w> {
         unsafe {
             self.column
                 .get_changed_by_unchecked(self.index)
-                .map(|v| *v.as_ref_unchecked())
+                .map(|v| *v.get())
         }
     }
 
@@ -1167,7 +1149,7 @@ impl<'w> ComponentTicksMut2<'w> {
         unsafe {
             self.column
                 .get_changed_by_unchecked(self.index)
-                .map(|v| v.as_mut_unchecked())
+                .map(|v| &mut *v.get())
         }
     }
 
@@ -1337,6 +1319,95 @@ impl<'w, T> AsMut<T> for Mut2<'w, T> {
         self.deref_mut()
     }
 }
+impl<'w, T: ?Sized> Mut2<'w, T> {
+    #[doc = r" Consume `self` and return a mutable reference to the"]
+    #[doc = r#" contained value while marking `self` as "changed"."#]
+    #[inline]
+    pub fn into_inner(mut self) -> &'w mut T {
+        self.set_changed();
+        self.value
+    }
+    #[doc = r" Returns a `Mut<>` with a smaller lifetime."]
+    #[doc = r" This is useful if you have `&mut"]
+    #[doc = "Mut2"]
+    #[doc = r" <T>`, but you need a `Mut<T>`."]
+    pub fn reborrow(&mut self) -> Mut2<'_, T> {
+        Mut2 {
+            value: self.value,
+            ticks: ComponentTicksMut2 {
+                column: self.ticks.column,
+                index: self.ticks.index,
+                last_run: self.ticks.last_run,
+                this_run: self.ticks.this_run,
+            },
+        }
+    }
+    #[doc = r" Maps to an inner value by applying a function to the contained reference, without flagging a change."]
+    #[doc = r""]
+    #[doc = r" You should never modify the argument passed to the closure -- if you want to modify the data"]
+    #[doc = r" without flagging a change, consider using [`DetectChangesMut::bypass_change_detection`] to make your intent explicit."]
+    #[doc = r""]
+    #[doc = r" ```"]
+    #[doc = r" # use bevy_ecs::prelude::*;"]
+    #[doc = r" # #[derive(PartialEq)] pub struct Vec2;"]
+    #[doc = r" # impl Vec2 { pub const ZERO: Self = Self; }"]
+    #[doc = r" # #[derive(Component)] pub struct Transform { translation: Vec2 }"]
+    #[doc = r" // When run, zeroes the translation of every entity."]
+    #[doc = r" fn reset_positions(mut transforms: Query<&mut Transform>) {"]
+    #[doc = r"     for transform in &mut transforms {"]
+    #[doc = r"         // We pinky promise not to modify `t` within the closure."]
+    #[doc = r"         // Breaking this promise will result in logic errors, but will never cause undefined behavior."]
+    #[doc = r"         let mut translation = transform.map_unchanged(|t| &mut t.translation);"]
+    #[doc = r"         // Only reset the translation if it isn't already zero;"]
+    #[doc = r"         translation.set_if_neq(Vec2::ZERO);"]
+    #[doc = r"     }"]
+    #[doc = r" }"]
+    #[doc = r" # bevy_ecs::system::assert_is_system(reset_positions);"]
+    #[doc = r" ```"]
+    pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut T) -> &mut U) -> Mut2<'w, U> {
+        Mut2 {
+            value: f(self.value),
+            ticks: self.ticks,
+        }
+    }
+    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference."]
+    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
+    #[doc = r""]
+    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
+    pub fn filter_map_unchanged<U: ?Sized>(
+        self,
+        f: impl FnOnce(&mut T) -> Option<&mut U>,
+    ) -> Option<Mut2<'w, U>> {
+        let value = f(self.value);
+        value.map(|value| Mut2 {
+            value,
+            ticks: self.ticks,
+        })
+    }
+    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference, returns an error on failure."]
+    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
+    #[doc = r""]
+    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
+    pub fn try_map_unchanged<U: ?Sized, E>(
+        self,
+        f: impl FnOnce(&mut T) -> Result<&mut U, E>,
+    ) -> Result<Mut2<'w, U>, E> {
+        let value = f(self.value);
+        value.map(|value| Mut2 {
+            value,
+            ticks: self.ticks,
+        })
+    }
+    #[doc = r" Allows you access to the dereferenced value of this pointer without immediately"]
+    #[doc = r" triggering change detection."]
+    pub fn as_deref_mut(&mut self) -> Mut2<'_, <T as Deref>::Target>
+    where
+        T: DerefMut,
+    {
+        self.reborrow().map_unchanged(|v| v.deref_mut())
+    }
+}
+impl_debug!(Mut2<'w, T>,);
 
 /// Data type returned by [`ContiguousQueryData::fetch_contiguous`](crate::query::ContiguousQueryData::fetch_contiguous)
 /// for [`Mut<T>`] and `&mut T`

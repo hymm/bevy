@@ -469,6 +469,14 @@ impl ComponentSparseSet {
         // SAFETY: This is using the valid size of the column.
         unsafe { self.dense.check_change_ticks(self.len(), check) };
     }
+
+    pub fn get_dense_column(&self) -> &Column {
+        &self.dense
+    }
+
+    pub fn get_dense_row(&self, entity: Entity) -> Option<TableRow> {
+        self.sparse.get(entity.index()).copied()
+    }
 }
 
 impl Drop for ComponentSparseSet {

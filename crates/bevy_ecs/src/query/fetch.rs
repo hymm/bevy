@@ -3,7 +3,7 @@ use crate::{
     bundle::Bundle,
     change_detection::{
         AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
-        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
+        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Mut2, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -12,7 +12,7 @@ use crate::{
         Access, DebugCheckedUnwrap, FilteredAccess, FilteredAccessSet, QueryFilter, QueryState,
         WorldQuery,
     },
-    storage::{ComponentSparseSet, Table, TableRow},
+    storage::{Column, ComponentSparseSet, Table, TableRow},
     system::Query,
     world::{
         unsafe_world_cell::UnsafeWorldCell, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept,
@@ -2362,13 +2362,7 @@ pub struct WriteFetch<'w, T: Component> {
     components: StorageSwitch<
         T,
         // T::STORAGE_TYPE = StorageType::Table
-        Option<(
-            ThinSlicePtr<'w, UnsafeCell<T>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            ThinSlicePtr<'w, UnsafeCell<Tick>>,
-            Option<&'w AtomicTick>,
-            MaybeLocation<ThinSlicePtr<'w, UnsafeCell<&'static Location<'static>>>>,
-        )>,
+        Option<(ThinSlicePtr<'w, UnsafeCell<T>>, &'w Column, usize)>,
         // T::STORAGE_TYPE = StorageType::SparseSet
         // Can be `None` when the component has never been inserted
         Option<&'w ComponentSparseSet>,
@@ -2452,16 +2446,8 @@ unsafe impl<'__w, T: Component> WorldQuery for &'__w mut T {
         let column = table.get_column(component_id).debug_checked_unwrap();
         let table_data = Some((
             column.get_data_slice(table.entity_count() as usize).into(),
-            column
-                .get_added_ticks_slice(table.entity_count() as usize)
-                .into(),
-            column
-                .get_changed_ticks_slice(table.entity_count() as usize)
-                .into(),
-            column.get_summary_tick(),
-            column
-                .get_changed_by_slice(table.entity_count() as usize)
-                .map(Into::into),
+            column,
+            table.entity_count() as usize,
         ));
         // SAFETY: set_table is only called when T::STORAGE_TYPE = StorageType::Table
         unsafe { fetch.components.set_table(table_data) };
@@ -2506,7 +2492,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = &'__w T;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = Mut2<'w, T>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
@@ -2524,55 +2510,42 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
         Some(fetch.components.extract(
             |table| {
                 // SAFETY: set_table was previously called
-                let (table_components, added_ticks, changed_ticks, summary_tick, callers) =
-                    unsafe { table.debug_checked_unwrap() };
+                let (table_components, column, _len) = unsafe { table.debug_checked_unwrap() };
 
                 // SAFETY: The caller ensures `table_row` is in range.
                 let component = unsafe { table_components.get_unchecked(table_row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let added = unsafe { added_ticks.get_unchecked(table_row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let changed = unsafe { changed_ticks.get_unchecked(table_row.index()) };
-                // SAFETY: The caller ensures `table_row` is in range.
-                let caller =
-                    callers.map(|callers| unsafe { callers.get_unchecked(table_row.index()) });
                 // Make it statically known whether the atomic tick is present or not.
-                let summary_tick = if T::HAS_SUMMARY_TICK {
-                    // SAFETY: Summary tick presence always matches `T::HAS_SUMMARY_TICK`.
-                    Some(unsafe { summary_tick.debug_checked_unwrap() })
-                } else {
-                    None
-                };
 
-                Mut {
-                    value: component.deref_mut(),
-                    ticks: ComponentTicksMut {
-                        added: added.deref_mut(),
-                        changed: changed.deref_mut(),
-                        changed_by: caller.map(|caller| caller.deref_mut()),
-                        this_run: fetch.this_run,
-                        last_run: fetch.last_run,
-                        summary_tick,
-                    },
-                }
+                Mut2::new(
+                    component.deref_mut(),
+                    column,
+                    table_row,
+                    fetch.last_run,
+                    fetch.this_run,
+                )
             },
             |sparse_set| {
                 // SAFETY: The caller ensures `entity` is in range and has the component.
-                let (component, ticks) = unsafe {
+                let component = unsafe {
                     sparse_set
                         .debug_checked_unwrap()
-                        .get_with_ticks(entity)
+                        .get(entity)
                         .debug_checked_unwrap()
                 };
 
-                Mut {
-                    value: component.assert_unique().deref_mut(),
-                    ticks: ComponentTicksMut::from_tick_cells(
-                        ticks,
-                        fetch.last_run,
-                        fetch.this_run,
-                    ),
-                }
+                let column = sparse_set.debug_checked_unwrap().get_dense_column();
+                let row = sparse_set
+                    .debug_checked_unwrap()
+                    .get_dense_row(entity)
+                    .debug_checked_unwrap();
+
+                Mut2::new(
+                    component.assert_unique().deref_mut(),
+                    column,
+                    row,
+                    fetch.last_run,
+                    fetch.this_run,
+                )
             },
         ))
     }
@@ -2608,8 +2581,7 @@ impl<T: Component<Mutability = Mutable>> ContiguousQueryData for &mut T {
         fetch.components.extract(
             |table| {
                 // SAFETY: set_table was previously called
-                let (table_components, added_ticks, changed_ticks, summary_tick, callers) =
-                    unsafe { table.debug_checked_unwrap() };
+                let (table_components, column, len) = unsafe { table.debug_checked_unwrap() };
 
                 let range = (range.start as usize)..(range.end as usize);
 
@@ -2622,10 +2594,10 @@ impl<T: Component<Mutability = Mutable>> ContiguousQueryData for &mut T {
                     // ticks.
                     ticks: unsafe {
                         ContiguousComponentTicksMut::from_slice_ptrs(
-                            added_ticks,
-                            changed_ticks,
-                            summary_tick,
-                            callers,
+                            column.get_added_ticks_slice(len).into(),
+                            column.get_changed_ticks_slice(len).into(),
+                            column.get_summary_tick(),
+                            column.get_changed_by_slice(len).map(Into::into),
                             range,
                             fetch.this_run,
                             fetch.last_run,
@@ -2737,7 +2709,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T>
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Ref<'__w, T>;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = Mut2<'w, T>;
 
     // Forwarded to `&mut T`
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
