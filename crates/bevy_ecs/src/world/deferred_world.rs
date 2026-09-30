@@ -199,7 +199,10 @@ impl<'w> DeferredWorld<'w> {
         let result = f(component.reborrow());
 
         // Simulate adding this component by updating the relevant ticks
-        *component.ticks.added = *component.ticks.changed;
+        // Safety: ticks were constructed safely by the constructor
+        unsafe {
+            *component.ticks.added_mut() = component.ticks.changed();
+        }
 
         // SAFETY:
         // - DeferredWorld ensures archetype pointer will remain valid as no

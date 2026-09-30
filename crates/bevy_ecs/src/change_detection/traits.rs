@@ -369,36 +369,40 @@ macro_rules! change_detection_impl {
         impl<$($generics),* : ?Sized $(+ $traits)?> DetectChanges for $name<$($generics),*> {
             #[inline]
             fn is_added(&self) -> bool {
+                // Safety: Constructor ensures safety
                 self.is_added_after(self.ticks.last_run)
             }
 
             #[inline]
             fn is_changed(&self) -> bool {
+                // Safety: Constructor ensures safety
                 self.is_changed_after(self.ticks.last_run)
             }
 
             #[inline]
              fn is_added_after(&self, other: Tick) -> bool {
-                self.ticks
-                    .added
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.added() }
                     .is_newer_than(other, self.ticks.this_run)
             }
 
             #[inline]
             fn is_changed_after(&self, other: Tick) -> bool {
-                self.ticks
-                    .changed
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.changed() }
                     .is_newer_than(other, self.ticks.this_run)
             }
 
             #[inline]
             fn last_changed(&self) -> Tick {
-                *self.ticks.changed
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.changed() }
             }
 
             #[inline]
             fn added(&self) -> Tick {
-                *self.ticks.added
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.added() }
             }
 
             #[inline]
@@ -413,7 +417,8 @@ macro_rules! change_detection_impl {
 
             #[inline]
             fn changed_by(&self) -> MaybeLocation {
-                self.ticks.changed_by.copied()
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.changed_by() }
             }
         }
 
@@ -445,46 +450,57 @@ macro_rules! change_detection_mut_impl {
             #[inline]
             #[track_caller]
             fn set_changed(&mut self) {
-                *self.ticks.changed = self.ticks.this_run;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                // Safety: Constructor ensures safety
+                unsafe {
+                    *self.ticks.changed_mut() = self.ticks.this_run;
+                    self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                    if let Some(summary_tick) = self.ticks.summary_tick() {
+                        summary_tick.set(self.ticks.this_run);
+                    }
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_added(&mut self) {
-                *self.ticks.changed = self.ticks.this_run;
-                *self.ticks.added = self.ticks.this_run;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
+                // Safety: Constructor ensures safety
+                unsafe {
+                    *self.ticks.changed_mut() = self.ticks.this_run;
+                    *self.ticks.added_mut() = self.ticks.this_run;
+                    self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                    if let Some(summary_tick) = self.ticks.summary_tick() {
+                        summary_tick.set(self.ticks.this_run);
+                    }
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_last_changed(&mut self, last_changed: Tick) {
-                *self.ticks.changed = last_changed;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick
-                    && self.is_changed_after(summary_tick.get())
-                {
-                    summary_tick.set(self.ticks.this_run);
+                unsafe {
+                    *self.ticks.changed_mut() = last_changed;
+                    self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                    if let Some(summary_tick) = self.ticks.summary_tick()
+                        && self.is_changed_after(summary_tick.get())
+                    {
+                        summary_tick.set(self.ticks.this_run);
+                    }
                 }
             }
 
             #[inline]
             #[track_caller]
             fn set_last_added(&mut self, last_added: Tick) {
-                *self.ticks.added = last_added;
-                *self.ticks.changed = last_added;
-                self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick
-                    && self.is_changed_after(summary_tick.get())
-                {
-                    summary_tick.set(self.ticks.this_run);
+                // Safety: Constructor ensures safety
+                unsafe {
+                    *self.ticks.added_mut() = last_added;
+                    *self.ticks.changed_mut() = last_added;
+                    self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+                    if let Some(summary_tick) = self.ticks.summary_tick()
+                        && self.is_changed_after(summary_tick.get())
+                    {
+                        summary_tick.set(self.ticks.this_run);
+                    }
                 }
             }
 
@@ -499,7 +515,8 @@ macro_rules! change_detection_mut_impl {
             #[track_caller]
             fn deref_mut(&mut self) -> &mut Self::Target {
                 self.set_changed();
-                self.ticks.changed_by.assign(MaybeLocation::caller());
+                // Safety: Constructor ensures safety
+                unsafe { self.ticks.changed_by_mut().assign(MaybeLocation::caller()) };
                 self.value
             }
         }
@@ -533,13 +550,11 @@ macro_rules! impl_methods {
             pub fn reborrow(&mut self) -> Mut<'_, $target> {
                 Mut {
                     value: self.value,
-                    ticks: ComponentTicksMut {
-                        added: self.ticks.added,
-                        changed: self.ticks.changed,
-                        changed_by: self.ticks.changed_by.as_deref_mut(),
+                    ticks: ComponentTicksMut2 {
+                        column: self.ticks.column,
+                        index: self.ticks.index,
                         last_run: self.ticks.last_run,
                         this_run: self.ticks.this_run,
-                        summary_tick: self.ticks.summary_tick,
                     },
                 }
             }

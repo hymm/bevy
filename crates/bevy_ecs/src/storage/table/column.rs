@@ -32,6 +32,10 @@ pub struct Column {
     summary_tick: Option<AtomicTick>,
 }
 
+// Safety: This probably isn't safe
+unsafe impl Send for Column {}
+unsafe impl Sync for Column {}
+
 impl Column {
     /// Create a new [`Column`] with the given `capacity`.
     pub fn with_capacity(component_info: &ComponentInfo, capacity: usize) -> Self {

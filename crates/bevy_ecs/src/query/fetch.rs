@@ -3,7 +3,7 @@ use crate::{
     bundle::Bundle,
     change_detection::{
         AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
-        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Mut2, Tick,
+        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -2492,7 +2492,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = &'__w T;
-    type Item<'w, 's> = Mut2<'w, T>;
+    type Item<'w, 's> = Mut<'w, T>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
@@ -2516,7 +2516,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
                 let component = unsafe { table_components.get_unchecked(table_row.index()) };
                 // Make it statically known whether the atomic tick is present or not.
 
-                Mut2::new(
+                Mut::new(
                     component.deref_mut(),
                     column,
                     table_row,
@@ -2539,7 +2539,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
                     .get_dense_row(entity)
                     .debug_checked_unwrap();
 
-                Mut2::new(
+                Mut::new(
                     component.assert_unique().deref_mut(),
                     column,
                     row,
@@ -2709,7 +2709,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T>
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Ref<'__w, T>;
-    type Item<'w, 's> = Mut2<'w, T>;
+    type Item<'w, 's> = Mut<'w, T>;
 
     // Forwarded to `&mut T`
     fn shrink<'wlong: 'wshort, 'wshort, 's>(

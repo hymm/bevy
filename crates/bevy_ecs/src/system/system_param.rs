@@ -7,7 +7,7 @@ pub use crate::change_detection::{NonSend, NonSendMut, Res, ResMut};
 use crate::{
     archetype::Archetypes,
     bundle::Bundles,
-    change_detection::{ComponentTicksMut, ComponentTicksRef, Tick},
+    change_detection::{ComponentTicksMut, ComponentTicksMut2, ComponentTicksRef, Tick},
     component::{ComponentId, Components, Mutable},
     entity::{Entities, EntityAllocator},
     query::{
@@ -16,7 +16,7 @@ use crate::{
     },
     resource::{Resource, ResourceEntities, IS_RESOURCE},
     system::{Query, Single, SkipIfAny, SystemAccess, SystemMeta, SystemState},
-    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FromWorld, World},
+    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FromWorld, Mut, World},
 };
 
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
@@ -954,13 +954,11 @@ unsafe impl<'a, T: Resource<Mutability = Mutable>> SystemParam for ResMut<'a, T>
         })?;
         Ok(ResMut {
             value: value.value.deref_mut::<T>(),
-            ticks: ComponentTicksMut {
-                added: value.ticks.added,
-                changed: value.ticks.changed,
-                changed_by: value.ticks.changed_by,
+            ticks: ComponentTicksMut2 {
+                column: value.ticks.column,
+                index: value.ticks.index,
                 last_run: system_meta.last_run,
                 this_run: change_tick,
-                summary_tick: None,
             },
         })
     }

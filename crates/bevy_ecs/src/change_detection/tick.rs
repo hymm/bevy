@@ -8,7 +8,10 @@ use core::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-use crate::change_detection::{MaybeLocation, MAX_CHANGE_AGE};
+use crate::{
+    change_detection::{MaybeLocation, MAX_CHANGE_AGE},
+    storage::Column,
+};
 
 /// A value that tracks when a system ran relative to other systems.
 /// This is used to power change detection.
@@ -191,6 +194,11 @@ pub struct ComponentTickCells<'a> {
     /// The summary tick for the column, if the component is dense and has a
     /// summary tick.
     pub summary_tick: Option<&'a AtomicTick>,
+}
+
+pub struct ComponentTickColumn<'a> {
+    pub column: &'a Column,
+    pub index: usize,
 }
 
 /// Records when a component or resource was added and when it was last mutably dereferenced (or added).
