@@ -1,6 +1,7 @@
 use core::hint::black_box;
 
 use bevy_ecs::{
+    change_detection::ComponentTicksMut,
     component::{Component, Mutable},
     entity::Entity,
     prelude::{Added, Changed, EntityWorldMut, QueryState},
@@ -174,7 +175,11 @@ fn all_changed_detection(criterion: &mut Criterion) {
     }
 }
 
-fn few_changed_detection_generic<T: Component<Mutability = Mutable> + Default + BenchModify>(
+fn few_changed_detection_generic<
+    T: for<'a> Component<Mutability = Mutable, ChangeTicks<'a> = ComponentTicksMut<'a>>
+        + Default
+        + BenchModify,
+>(
     group: &mut BenchGroup,
     entity_count: u32,
 ) {
@@ -188,8 +193,7 @@ fn few_changed_detection_generic<T: Component<Mutability = Mutable> + Default + 
                     let mut world = setup::<T>(entity_count);
                     world.clear_trackers();
                     let mut query = world.query::<&mut T>();
-                    let mut to_modify: Vec<bevy_ecs::prelude::Mut<T>> =
-                        query.iter_mut(&mut world).collect();
+                    let mut to_modify: Vec<_> = query.iter_mut(&mut world).collect();
                     to_modify.shuffle(&mut deterministic_rand());
                     for component in to_modify[0..amount_to_modify].iter_mut() {
                         black_box(component.bench_modify());

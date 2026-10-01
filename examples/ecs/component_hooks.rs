@@ -18,6 +18,7 @@ use bevy::{
     ecs::lifecycle::{ComponentHook, HookContext},
     prelude::*,
 };
+use bevy_ecs::change_detection::{ComponentTicksMut, MutComp};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -32,6 +33,11 @@ struct MyComponent(KeyCode);
 impl Component for MyComponent {
     const STORAGE_TYPE: StorageType = StorageType::Table;
     type Mutability = Mutable;
+    type ChangeTicks<'w> = ComponentTicksMut<'w>;
+
+    fn shrink<'long: 'short, 'short>(item: MutComp<'long, Self>) -> MutComp<'short, Self> {
+        MutComp::shrink(item)
+    }
 
     /// Hooks can also be registered during component initialization by
     /// implementing the associated method

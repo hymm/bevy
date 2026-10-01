@@ -2,6 +2,7 @@ use accesskit::Role;
 use bevy_a11y::AccessibilityNode;
 use bevy_app::{Plugin, PreUpdate};
 use bevy_ecs::{
+    change_detection::MutComp,
     component::Component,
     entity::Entity,
     hierarchy::Children,
@@ -228,7 +229,7 @@ fn set_switch_styles(
     activate_on_press: bool,
     outline_bg: &ThemeBackgroundColor,
     outline_border: &ThemeBorderColor,
-    slide_style: &mut Mut<Node>,
+    slide_style: &mut MutComp<Node>,
     slide_bg_color: &ThemeBackgroundColor,
     slide_border_color: &ThemeBorderColor,
     commands: &mut Commands,
