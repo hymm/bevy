@@ -488,7 +488,10 @@ mod parallel {
     // TODO: this implementation could be used in no_std if there are equivalents of these.
     use crate::systems::StaticTransformOptimizations;
     use alloc::{sync::Arc, vec::Vec};
-    use bevy_ecs::{entity::UniqueEntitySlice, prelude::*, system::lifetimeless::Read};
+    use bevy_ecs::{
+        change_detection::MutComp, entity::UniqueEntitySlice, prelude::*,
+        system::lifetimeless::Read,
+    };
     use bevy_tasks::{ComputeTaskPool, TaskPool};
     use bevy_utils::Parallel;
     use core::sync::atomic::{AtomicI32, Ordering};
@@ -678,7 +681,7 @@ mod parallel {
     #[expect(unsafe_code, reason = "Mutating disjoint entities in parallel")]
     unsafe fn propagate_descendants_unchecked(
         parent: Entity,
-        p_global_transform: Mut<GlobalTransform>,
+        mut p_global_transform: MutComp<GlobalTransform>,
         p_children: &Children,
         nodes: &NodeQuery,
         outbox: &mut Vec<Entity>,
@@ -688,7 +691,7 @@ mod parallel {
     ) {
         // Create mutable copies of the input variables, used for iterative depth-first traversal.
         let (mut parent, mut p_global_transform, mut p_children) =
-            (parent, p_global_transform, p_children);
+            (parent, p_global_transform.reborrow(), p_children);
 
         // See the optimization note at the end to understand why this loop is here.
         for depth in 1..=max_depth {

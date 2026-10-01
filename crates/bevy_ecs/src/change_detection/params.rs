@@ -359,7 +359,7 @@ impl<'w> From<ComponentTicksMut<'w>> for ComponentTicksRef<'w> {
 
 /// Used by mutable query parameters (such as [`Mut`] and [`ResMut`])
 /// to store mutable access to the [`Tick`]s of a single component or resource.
-pub(crate) struct ComponentTicksMutSumm<'w> {
+pub struct ComponentTicksMutSumm<'w> {
     pub(crate) added: &'w mut Tick,
     pub(crate) changed: &'w mut Tick,
     pub(crate) changed_by: MaybeLocation<&'w mut &'static Location<'static>>,
@@ -1300,9 +1300,21 @@ change_detection_mut_impl!(Mut<'w, T>, T,);
 impl_methods!(Mut<'w, T>, T,);
 impl_debug!(Mut<'w, T>,);
 
+impl<'w, T: ?Sized + Component> From<MutComp<'w, T>> for Mut<'w, T>
+where
+    T: Component<ChangeTicks<'w> = ComponentTicksMut<'w>>,
+{
+    fn from(mut_comp: MutComp<'w, T>) -> Self {
+        Self {
+            value: mut_comp.value,
+            ticks: mut_comp.ticks,
+        }
+    }
+}
+
 pub struct MutComp<'w, T: ?Sized + Component> {
-    pub(crate) value: &'w mut T,
-    pub(crate) ticks: T::ChangeTicks<'w>,
+    pub value: &'w mut T,
+    pub ticks: T::ChangeTicks<'w>,
 }
 
 impl<'w, T: ?Sized + Component> DetectChanges for MutComp<'w, T> {
@@ -1507,6 +1519,33 @@ where
         T: DerefMut,
     {
         self.reborrow().map_unchanged(|v| v.deref_mut())
+    }
+}
+
+impl<'w, T: ?Sized + Component> Shrinkable for MutComp<'w, T>
+where
+    for<'a> T: Component<ChangeTicks<'a> = ComponentTicksMut<'a>>,
+{
+    type Item<'a> = MutComp<'a, T>;
+
+    fn shrink<'long: 'short, 'short>(item: MutComp<'long, T>) -> MutComp<'short, T> {
+        MutComp {
+            value: item.value,
+            ticks: item.ticks,
+        }
+    }
+}
+impl<'w, T: ?Sized + Component> Shrinkable for MutComp<'w, T>
+where
+    for<'a> T: Component<ChangeTicks<'a> = ComponentTicksMutSumm<'a>>,
+{
+    type Item<'a> = MutComp<'a, T>;
+
+    fn shrink<'long: 'short, 'short>(item: MutComp<'long, T>) -> MutComp<'short, T> {
+        MutComp {
+            value: item.value,
+            ticks: item.ticks,
+        }
     }
 }
 impl_debug!(MutComp<'w, T>, Component);

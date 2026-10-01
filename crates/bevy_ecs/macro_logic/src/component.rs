@@ -385,11 +385,7 @@ impl DeriveComponent {
                 fn shrink<'long: 'short, 'short>(
                     item: #bevy_ecs::change_detection::MutComp<'long, Self>
                 ) -> #bevy_ecs::change_detection::MutComp<'short, Self> {
-                    #bevy_ecs::change_detection::MutComp {
-                        // TODO: this fields are current private so this breaks public implementors of Component
-                        value: item.value,
-                        ticks: item.ticks,
-                    }
+                    #bevy_ecs::change_detection::MutComp::shrink(item)
                 }
 
                 fn register_required_components(

@@ -4,7 +4,7 @@ use bevy_app::{Plugin, PostUpdate};
 use bevy_camera::visibility::Visibility;
 use bevy_color::{Alpha, Color, Hsla, Srgba};
 use bevy_ecs::{
-    change_detection::{DetectChanges, DetectChangesMut},
+    change_detection::{DetectChanges, DetectChangesMut, MutComp},
     component::Component,
     entity::Entity,
     event::EntityEvent,
@@ -1312,7 +1312,7 @@ fn color_input_state<'a>(
     q_parent: &Query<&ChildOf>,
     q_state: &'a mut Query<&mut ColorInputState>,
     from: Entity,
-) -> Option<(Entity, Mut<'a, ColorInputState>)> {
+) -> Option<(Entity, MutComp<'a, ColorInputState>)> {
     let root_id = q_parent
         .iter_ancestors(from)
         .find(|e| q_state.contains(*e))?;

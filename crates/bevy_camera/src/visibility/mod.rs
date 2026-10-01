@@ -32,6 +32,7 @@ mod render_layers;
 
 use core::any::TypeId;
 
+use bevy_ecs::change_detection::MutComp;
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::world::DeferredWorld;
@@ -287,7 +288,7 @@ pub trait SetViewVisibility {
     fn set_visible(&mut self);
 }
 
-impl<'a> SetViewVisibility for Mut<'a, ViewVisibility> {
+impl<'a> SetViewVisibility for MutComp<'a, ViewVisibility> {
     #[inline]
     fn set_visible(&mut self) {
         // Only update if it's not already visible.
