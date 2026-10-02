@@ -1,6 +1,29 @@
-use crate::{change_detection::MaybeLocation, change_detection::Tick};
+use crate::change_detection::{AtomicTick, ComponentTicksMut, MaybeLocation, Tick};
 use alloc::borrow::ToOwned;
-use core::mem;
+use core::{mem, panic::Location};
+
+pub trait ChangeTicksMut<'w>: Into<ComponentTicksMut<'w>> {
+    fn new(
+        added: &'w mut Tick,
+        changed: &'w mut Tick,
+        summary_tick: Option<&'w AtomicTick>,
+        last_run: Tick,
+        this_run: Tick,
+        caller: MaybeLocation<&'w mut &'static Location<'static>>,
+    ) -> Self;
+
+    fn added(&self) -> Tick;
+    fn added_mut(&mut self) -> &mut Tick;
+    fn changed(&self) -> Tick;
+    fn changed_mut(&mut self) -> &mut Tick;
+    fn changed_by(&self) -> MaybeLocation;
+    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>>;
+    fn last_run(&self) -> Tick;
+    fn last_run_mut(&mut self) -> &mut Tick;
+    fn this_run(&self) -> Tick;
+    fn this_run_mut(&mut self) -> &mut Tick;
+    fn summary_tick(&self) -> Option<&AtomicTick>;
+}
 
 /// Types that can read change detection information.
 /// This change detection is controlled by [`DetectChangesMut`] types such as [`ResMut`].

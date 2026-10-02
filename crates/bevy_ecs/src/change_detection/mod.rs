@@ -188,7 +188,7 @@ mod tests {
         let mut caller = MaybeLocation::caller();
         let summary_tick = AtomicTick::default();
 
-        let val = Mut::new(
+        let val: Mut<'_, _, ComponentTicksMut<'_>> = Mut::new(
             &mut res,
             &mut component_ticks.added,
             &mut component_ticks.changed,
