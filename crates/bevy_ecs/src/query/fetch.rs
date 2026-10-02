@@ -2,8 +2,9 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundle,
     change_detection::{
-        AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
-        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
+        AtomicTick, ChangeTicksMut, ComponentTicksMut, ComponentTicksRef,
+        ContiguousComponentTicksMut, ContiguousComponentTicksRef, ContiguousMut, ContiguousRef,
+        MaybeLocation, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
@@ -2546,14 +2547,14 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
 
                 Mut {
                     value: component.deref_mut(),
-                    ticks: ComponentTicksMut {
-                        added: added.deref_mut(),
-                        changed: changed.deref_mut(),
-                        changed_by: caller.map(|caller| caller.deref_mut()),
-                        this_run: fetch.this_run,
-                        last_run: fetch.last_run,
+                    ticks: ComponentTicksMut::new(
+                        added.deref_mut(),
+                        changed.deref_mut(),
                         summary_tick,
-                    },
+                        fetch.this_run,
+                        fetch.last_run,
+                        caller.map(|caller| caller.deref_mut()),
+                    ),
                 }
             },
             |sparse_set| {

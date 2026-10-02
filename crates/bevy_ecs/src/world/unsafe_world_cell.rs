@@ -5,8 +5,8 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{
-        ComponentTickCells, ComponentTicks, ComponentTicksMut, ComponentTicksRef, MaybeLocation,
-        MutUntyped, Tick,
+        ComponentTickCells, ComponentTicks, ComponentTicksMut, ComponentTicksMutSumm,
+        ComponentTicksRef, MaybeLocation, MutUntyped, Tick,
     },
     component::{ComponentId, Components, Mutable, StorageType},
     entity::{
@@ -683,7 +683,7 @@ impl<'w> UnsafeWorldCell<'w> {
             // - index is in-bounds because the column is initialized and non-empty
             // - no other reference to the ticks of the same row can exist at the same time
             unsafe {
-                ComponentTicksMut::from_tick_cells(ticks, self.last_change_tick(), change_tick)
+                ComponentTicksMutSumm::from_tick_cells(ticks, self.last_change_tick(), change_tick)
             };
 
         Some(MutUntyped {
@@ -1200,7 +1200,11 @@ impl<'w> UnsafeEntityCell<'w> {
                 MutUntyped {
                     // SAFETY: world access validated by caller and ties world lifetime to `MutUntyped` lifetime
                     value: value.assert_unique(),
-                    ticks: ComponentTicksMut::from_tick_cells(cells, self.last_run, self.this_run),
+                    ticks: ComponentTicksMutSumm::from_tick_cells(
+                        cells,
+                        self.last_run,
+                        self.this_run,
+                    ),
                 }
             })
             .ok_or(GetEntityMutByIdError::ComponentNotFound)
@@ -1245,7 +1249,11 @@ impl<'w> UnsafeEntityCell<'w> {
                 MutUntyped {
                     // SAFETY: world access validated by caller and ties world lifetime to `MutUntyped` lifetime
                     value: value.assert_unique(),
-                    ticks: ComponentTicksMut::from_tick_cells(cells, self.last_run, self.this_run),
+                    ticks: ComponentTicksMutSumm::from_tick_cells(
+                        cells,
+                        self.last_run,
+                        self.this_run,
+                    ),
                 }
             })
             .ok_or(GetEntityMutByIdError::ComponentNotFound)
