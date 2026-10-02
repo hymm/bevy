@@ -1,4 +1,4 @@
-use crate::{change_detection::MaybeLocation, change_detection::Tick};
+use crate::change_detection::{MaybeLocation, Tick};
 use alloc::borrow::ToOwned;
 use core::mem;
 
@@ -447,9 +447,6 @@ macro_rules! change_detection_mut_impl {
             fn set_changed(&mut self) {
                 *self.ticks.changed = self.ticks.this_run;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -458,9 +455,6 @@ macro_rules! change_detection_mut_impl {
                 *self.ticks.changed = self.ticks.this_run;
                 *self.ticks.added = self.ticks.this_run;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -468,11 +462,6 @@ macro_rules! change_detection_mut_impl {
             fn set_last_changed(&mut self, last_changed: Tick) {
                 *self.ticks.changed = last_changed;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick
-                    && self.is_changed_after(summary_tick.get())
-                {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -481,11 +470,6 @@ macro_rules! change_detection_mut_impl {
                 *self.ticks.added = last_added;
                 *self.ticks.changed = last_added;
                 self.ticks.changed_by.assign(MaybeLocation::caller());
-                if let Some(summary_tick) = self.ticks.summary_tick
-                    && self.is_changed_after(summary_tick.get())
-                {
-                    summary_tick.set(self.ticks.this_run);
-                }
             }
 
             #[inline]
@@ -539,7 +523,6 @@ macro_rules! impl_methods {
                         changed_by: self.ticks.changed_by.as_deref_mut(),
                         last_run: self.ticks.last_run,
                         this_run: self.ticks.this_run,
-                        summary_tick: self.ticks.summary_tick,
                     },
                 }
             }

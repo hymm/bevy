@@ -2,7 +2,7 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundle,
     change_detection::{
-        AtomicTick, ComponentTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
+        AtomicTick, ChangeTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
         ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
@@ -2506,12 +2506,12 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = &'__w T;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = Mut<'w, T, T::ChangeTicks<'w>>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
     ) -> Self::Item<'wshort, 's> {
-        item
+        <T as Component>::shrink_mut(item)
     }
 
     #[inline(always)]
@@ -2546,14 +2546,14 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
 
                 Mut {
                     value: component.deref_mut(),
-                    ticks: ComponentTicksMut {
-                        added: added.deref_mut(),
-                        changed: changed.deref_mut(),
-                        changed_by: caller.map(|caller| caller.deref_mut()),
-                        this_run: fetch.this_run,
-                        last_run: fetch.last_run,
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut>::new(
+                        added.deref_mut(),
+                        changed.deref_mut(),
                         summary_tick,
-                    },
+                        fetch.last_run,
+                        fetch.this_run,
+                        caller.map(|caller| caller.deref_mut()),
+                    ),
                 }
             },
             |sparse_set| {
@@ -2567,7 +2567,7 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
 
                 Mut {
                     value: component.assert_unique().deref_mut(),
-                    ticks: ComponentTicksMut::from_tick_cells(
+                    ticks: <T::ChangeTicks<'w> as ChangeTicksMut>::from_tick_cells(
                         ticks,
                         fetch.last_run,
                         fetch.this_run,
@@ -2653,7 +2653,7 @@ impl<T: Component<Mutability = Mutable>> ContiguousQueryData for &mut T {
 // This is sound because `update_component_access` adds write access for that component and panic when appropriate.
 // `update_component_access` adds a `With` filter for a component.
 // This is sound because `matches_component_set` returns whether the set contains that component.
-unsafe impl<'__w, T: Component> WorldQuery for Mut<'__w, T> {
+unsafe impl<'__w, T: Component> WorldQuery for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>> {
     type Fetch<'w> = WriteFetch<'w, T>;
     type State = ComponentId;
 
@@ -2733,17 +2733,19 @@ unsafe impl<'__w, T: Component> WorldQuery for Mut<'__w, T> {
 }
 
 // SAFETY: access of `Ref<T>` is a subset of `Mut<T>`
-unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T> {
+unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
     const IS_READ_ONLY: bool = false;
     const IS_ARCHETYPAL: bool = true;
     type ReadOnly = Ref<'__w, T>;
-    type Item<'w, 's> = Mut<'w, T>;
+    type Item<'w, 's> = Mut<'w, T, T::ChangeTicks<'w>>;
 
     // Forwarded to `&mut T`
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
     ) -> Self::Item<'wshort, 's> {
-        <&mut T as QueryData>::shrink(item)
+        <T as Component>::shrink_mut(item)
     }
 
     #[inline(always)]
@@ -2765,20 +2767,33 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T>
 }
 
 // SAFETY: access is only on the current entity
-unsafe impl<T: Component<Mutability = Mutable>> IterQueryData for Mut<'_, T> {}
+unsafe impl<'__w, T: Component<Mutability = Mutable>> IterQueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
+}
 
 // SAFETY: access is only on the current entity
-unsafe impl<T: Component<Mutability = Mutable>> SingleEntityQueryData for Mut<'_, T> {}
+unsafe impl<'__w, T: Component<Mutability = Mutable>> SingleEntityQueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
+}
 
-impl<T: Component<Mutability = Mutable>> ReleaseStateQueryData for Mut<'_, T> {
+impl<'__w, T: Component<Mutability = Mutable>> ReleaseStateQueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
     fn release_state<'w>(item: Self::Item<'w, '_>) -> Self::Item<'w, 'static> {
         item
     }
 }
 
-impl<T: Component<Mutability = Mutable>> ArchetypeQueryData for Mut<'_, T> {}
+impl<'__w, T: Component<Mutability = Mutable>> ArchetypeQueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
+}
 
-impl<'__w, T: Component<Mutability = Mutable>> ContiguousQueryData for Mut<'__w, T> {
+impl<'__w, T: Component<Mutability = Mutable>> ContiguousQueryData
+    for Mut<'__w, T, <T as Component>::ChangeTicks<'__w>>
+{
     type Contiguous<'w, 's> = ContiguousMut<'w, T>;
 
     unsafe fn fetch_contiguous<'w, 's>(

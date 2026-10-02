@@ -1,10 +1,12 @@
 //! Types that detect when their internal data mutate.
 
+mod component_ticks;
 mod maybe_location;
 mod params;
 mod tick;
 mod traits;
 
+pub use component_ticks::{ChangeTicksMut, ComponentTicksMut, ComponentTicksMutSumm};
 pub use maybe_location::MaybeLocation;
 pub use params::*;
 pub use tick::*;
@@ -34,8 +36,8 @@ mod tests {
 
     use crate::{
         change_detection::{
-            AtomicTick, ComponentTicks, ComponentTicksMut, MaybeLocation, Mut, NonSendMut, Ref,
-            ResMut, Tick, CHECK_TICK_THRESHOLD, MAX_CHANGE_AGE,
+            AtomicTick, ComponentTicks, ComponentTicksMut, ComponentTicksMutSumm, MaybeLocation,
+            Mut, NonSendMut, Ref, ResMut, Tick, CHECK_TICK_THRESHOLD, MAX_CHANGE_AGE,
         },
         component::Component,
         system::{IntoSystem, Single, System},
@@ -155,14 +157,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -188,7 +188,7 @@ mod tests {
         let mut caller = MaybeLocation::caller();
         let summary_tick = AtomicTick::default();
 
-        let val = Mut::new(
+        let val: Mut<'_, _, ComponentTicksMut<'_>> = Mut::new(
             &mut res,
             &mut component_ticks.added,
             &mut component_ticks.changed,
@@ -209,14 +209,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut res = R {};
 
@@ -244,14 +242,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run,
             this_run,
-            summary_tick: Some(&summary_tick),
         };
 
         let mut outer = Outer(0);
@@ -335,7 +331,7 @@ mod tests {
         };
         let mut caller = MaybeLocation::caller();
         let summary_tick = AtomicTick::default();
-        let ticks = ComponentTicksMut {
+        let ticks = ComponentTicksMutSumm {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
@@ -372,14 +368,12 @@ mod tests {
             changed: Tick::new(2),
         };
         let mut caller = MaybeLocation::caller();
-        let summary_tick = AtomicTick::default();
         let ticks = ComponentTicksMut {
             added: &mut component_ticks.added,
             changed: &mut component_ticks.changed,
             changed_by: caller.as_mut(),
             last_run: Tick::new(3),
             this_run: Tick::new(4),
-            summary_tick: Some(&summary_tick),
         };
         let mut c = C {};
 

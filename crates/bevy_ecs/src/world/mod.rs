@@ -1363,7 +1363,7 @@ impl World {
     pub fn get_mut<T: Component<Mutability = Mutable>>(
         &mut self,
         entity: Entity,
-    ) -> Option<Mut<'_, T>> {
+    ) -> Option<Mut<'_, T, T::ChangeTicks<'_>>> {
         self.get_entity_mut(entity).ok()?.into_mut()
     }
 
@@ -3023,7 +3023,6 @@ impl World {
                 changed_by: guard.caller.as_mut(),
                 last_run: last_change_tick,
                 this_run: change_tick,
-                summary_tick: None,
             },
         };
 

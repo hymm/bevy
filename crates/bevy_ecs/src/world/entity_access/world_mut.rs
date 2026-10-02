@@ -520,7 +520,9 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     #[inline]
-    pub fn get_mut<T: Component<Mutability = Mutable>>(&mut self) -> Option<Mut<'_, T>> {
+    pub fn get_mut<T: Component<Mutability = Mutable>>(
+        &mut self,
+    ) -> Option<Mut<'_, T, T::ChangeTicks<'_>>> {
         self.as_mutable().into_mut()
     }
 
@@ -616,7 +618,9 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// - `T` must be a mutable component
     #[inline]
-    pub unsafe fn get_mut_assume_mutable<T: Component>(&mut self) -> Option<Mut<'_, T>> {
+    pub unsafe fn get_mut_assume_mutable<T: Component>(
+        &mut self,
+    ) -> Option<Mut<'_, T, T::ChangeTicks<'_>>> {
         let entity_mut = self.as_mutable();
         // SAFETY: Same preconditions
         unsafe { entity_mut.into_mut_assume_mutable() }
@@ -630,7 +634,9 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     #[inline]
-    pub fn into_mut<T: Component<Mutability = Mutable>>(self) -> Option<Mut<'w, T>> {
+    pub fn into_mut<T: Component<Mutability = Mutable>>(
+        self,
+    ) -> Option<Mut<'w, T, T::ChangeTicks<'w>>> {
         // SAFETY: consuming `self` implies exclusive access
         unsafe { self.into_unsafe_entity_cell().get_mut() }
     }
@@ -647,7 +653,9 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// - `T` must be a mutable component
     #[inline]
-    pub unsafe fn into_mut_assume_mutable<T: Component>(self) -> Option<Mut<'w, T>> {
+    pub unsafe fn into_mut_assume_mutable<T: Component>(
+        self,
+    ) -> Option<Mut<'w, T, T::ChangeTicks<'w>>> {
         // SAFETY: consuming `self` implies exclusive access
         unsafe { self.into_unsafe_entity_cell().get_mut_assume_mutable() }
     }

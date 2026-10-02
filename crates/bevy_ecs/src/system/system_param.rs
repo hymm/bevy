@@ -7,7 +7,7 @@ pub use crate::change_detection::{NonSend, NonSendMut, Res, ResMut};
 use crate::{
     archetype::Archetypes,
     bundle::Bundles,
-    change_detection::{ComponentTicksMut, ComponentTicksRef, Tick},
+    change_detection::{ChangeTicksMut, ComponentTicksMut, ComponentTicksRef, Tick},
     component::{ComponentId, Components, Mutable},
     entity::{Entities, EntityAllocator},
     query::{
@@ -960,7 +960,6 @@ unsafe impl<'a, T: Resource<Mutability = Mutable>> SystemParam for ResMut<'a, T>
                 changed_by: value.ticks.changed_by,
                 last_run: system_meta.last_run,
                 this_run: change_tick,
-                summary_tick: None,
             },
         })
     }
