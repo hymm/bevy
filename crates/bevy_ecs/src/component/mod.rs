@@ -13,11 +13,12 @@ pub use register::*;
 pub use required::*;
 
 use crate::{
+    change_detection::ChangeTicksMut,
     entity::EntityMapper,
     lifecycle::ComponentHook,
     relationship::ComponentRelationshipAccessor,
     system::{Local, SystemParam},
-    world::{FromWorld, World},
+    world::{FromWorld, Mut, World},
 };
 pub use bevy_ecs_macros::Component;
 use core::{fmt::Debug, marker::PhantomData, ops::Deref};
@@ -538,6 +539,12 @@ pub trait Component: Send + Sync + 'static {
     /// * For a component to be mutable, this type must be [`Mutable`].
     /// * For a component to be immutable, this type must be [`Immutable`].
     type Mutability: ComponentMutability;
+
+    type ChangeTicks<'w>: ChangeTicksMut<'w>;
+
+    fn shrink_mut<'long: 'short, 'short>(
+        item: Mut<'long, Self, Self::ChangeTicks<'long>>,
+    ) -> Mut<'short, Self, Self::ChangeTicks<'short>>;
 
     /// Gets the `on_add` [`ComponentHook`] for this [`Component`] if one is defined.
     fn on_add() -> Option<ComponentHook> {

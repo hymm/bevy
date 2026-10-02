@@ -5,8 +5,8 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{
-        ComponentTickCells, ComponentTicks, ComponentTicksMut, ComponentTicksMutSumm,
-        ComponentTicksRef, MaybeLocation, MutUntyped, Tick,
+        ChangeTicksMut, ComponentTickCells, ComponentTicks, ComponentTicksMut,
+        ComponentTicksMutSumm, ComponentTicksRef, MaybeLocation, MutUntyped, Tick,
     },
     component::{ComponentId, Components, Mutable, StorageType},
     entity::{

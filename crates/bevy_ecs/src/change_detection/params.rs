@@ -254,28 +254,6 @@ pub struct ComponentTicksMut<'w> {
     pub(crate) last_run: Tick,
     pub(crate) this_run: Tick,
 }
-
-impl<'w> ComponentTicksMut<'w> {
-    /// # Safety
-    /// This should never alias the underlying ticks. All access must be unique.
-    #[inline]
-    pub(crate) unsafe fn from_tick_cells(
-        cells: ComponentTickCells<'w>,
-        last_run: Tick,
-        this_run: Tick,
-    ) -> Self {
-        Self {
-            // SAFETY: Caller ensures there is no alias to the cell.
-            added: unsafe { cells.added.deref_mut() },
-            // SAFETY: Caller ensures there is no alias to the cell.
-            changed: unsafe { cells.changed.deref_mut() },
-            // SAFETY: Caller ensures there is no alias to the cell.
-            changed_by: unsafe { cells.changed_by.map(|changed_by| changed_by.deref_mut()) },
-            last_run,
-            this_run,
-        }
-    }
-}
 impl<'w> ChangeTicksMut<'w> for ComponentTicksMut<'w> {
     fn new(
         added: &'w mut Tick,
@@ -289,6 +267,25 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMut<'w> {
             added,
             changed,
             changed_by: caller,
+            last_run,
+            this_run,
+        }
+    }
+
+    /// # Safety
+    /// This should never alias the underlying ticks. All access must be unique.
+    unsafe fn from_tick_cells(
+        cells: ComponentTickCells<'w>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> Self {
+        Self {
+            // SAFETY: Caller ensures there is no alias to the cell.
+            added: unsafe { cells.added.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed: unsafe { cells.changed.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed_by: unsafe { cells.changed_by.map(|changed_by| changed_by.deref_mut()) },
             last_run,
             this_run,
         }
@@ -414,6 +411,25 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMutSumm<'w> {
             last_run,
             this_run,
             summary_tick,
+        }
+    }
+
+    unsafe fn from_tick_cells(
+        cells: ComponentTickCells<'w>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> Self {
+        Self {
+            // SAFETY: Caller ensures there is no alias to the cell.
+            added: unsafe { cells.added.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed: unsafe { cells.changed.deref_mut() },
+            // SAFETY: Caller ensures there is no alias to the cell.
+            summary_tick: cells.summary_tick,
+            // SAFETY: Caller ensures there is no alias to the cell.
+            changed_by: unsafe { cells.changed_by.map(|changed_by| changed_by.deref_mut()) },
+            last_run,
+            this_run,
         }
     }
 
@@ -1483,6 +1499,7 @@ impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMut<'w>> {
         self.reborrow().map_unchanged(|v| v.deref_mut())
     }
 }
+
 impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> core::fmt::Debug for Mut<'w, T, Ticks>
 where
     T: core::fmt::Debug,
