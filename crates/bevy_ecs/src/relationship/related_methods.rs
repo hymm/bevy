@@ -254,20 +254,17 @@ impl<'w> EntityWorldMut<'w> {
             assert_eq!(newly_related_entities, entities_to_relate, "`entities_to_relate` ({entities_to_relate:?}) didn't contain all entities that would end up related");
         };
 
-        match self.get_mut::<R::RelationshipTarget>() {
-            None => {
-                self.add_related::<R>(entities_to_relate);
+        if let Some(mut target) = self.get_mut::<R::RelationshipTarget>() {
+            // SAFETY: The invariants expected by this function mean we'll only be inserting entities that are already related.
+            let collection = target.collection_mut_risky();
+            collection.clear();
 
-                return self;
-            }
-            Some(mut target) => {
-                // SAFETY: The invariants expected by this function mean we'll only be inserting entities that are already related.
-                let collection = target.collection_mut_risky();
-                collection.clear();
+            collection.extend_from_iter(entities_to_relate.iter().copied());
+        } else {
+            self.add_related::<R>(entities_to_relate);
 
-                collection.extend_from_iter(entities_to_relate.iter().copied());
-            }
-        }
+            return self;
+        };
 
         let this = self.id();
         self.world_scope(|world| {
