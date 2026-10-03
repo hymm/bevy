@@ -1363,7 +1363,7 @@ impl World {
     pub fn get_mut<T: Component<Mutability = Mutable>>(
         &mut self,
         entity: Entity,
-    ) -> Option<Mut<'_, T>> {
+    ) -> Option<Mut<'_, T, T::ChangeTicks<'_>>> {
         self.get_entity_mut(entity).ok()?.into_mut()
     }
 

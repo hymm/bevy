@@ -263,7 +263,7 @@ impl<'w, 'a, T: Component<Mutability = Mutable>> OccupiedComponentEntry<'w, 'a, 
     /// assert_eq!(world.query::<&Comp>().single(&world).unwrap().0, 17);
     /// ```
     #[inline]
-    pub fn get_mut(&mut self) -> Mut<'_, T> {
+    pub fn get_mut(&mut self) -> Mut<'_, T, T::ChangeTicks<'_>> {
         // This shouldn't panic because if we have an OccupiedComponentEntry the component must exist.
         self.entity_world.get_mut::<T>().unwrap()
     }
