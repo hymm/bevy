@@ -958,7 +958,7 @@ mod tests {
         }
     }
 
-    /// Ensure that, when a single instance of a component in a single table
+    /// Ensure that, when a single insctance of a component in a single table
     /// are updated, the summary tick is also updated.
     #[test]
     fn summary_ticks_reflect_changes_to_a_single_instance_of_a_component() {

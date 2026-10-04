@@ -2551,8 +2551,8 @@ unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T 
                         added.deref_mut(),
                         changed.deref_mut(),
                         summary_tick,
-                        fetch.this_run,
                         fetch.last_run,
+                        fetch.this_run,
                         caller.map(|caller| caller.deref_mut()),
                     ),
                 }

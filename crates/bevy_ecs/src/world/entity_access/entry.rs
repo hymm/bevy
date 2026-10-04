@@ -34,7 +34,7 @@ impl<'w, 'a, T: Component<Mutability = Mutable>> ComponentEntry<'w, 'a, T> {
     /// assert_eq!(world.query::<&Comp>().single(&world).unwrap().0, 1);
     /// ```
     #[inline]
-    pub fn and_modify<F: FnOnce(Mut<'_, T, T::ChangeTicks<'_>>)>(self, f: F) -> Self {
+    pub fn and_modify<F: for<'b> FnOnce(Mut<'b, T, T::ChangeTicks<'b>>)>(self, f: F) -> Self {
         match self {
             ComponentEntry::Occupied(mut entry) => {
                 f(entry.get_mut());

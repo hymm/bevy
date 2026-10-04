@@ -474,7 +474,7 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMutSumm<'w> {
     }
 
     fn summary_tick(&self) -> Option<&AtomicTick> {
-        None
+        self.summary_tick
     }
 }
 
