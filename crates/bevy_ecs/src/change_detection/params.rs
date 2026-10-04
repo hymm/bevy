@@ -1288,6 +1288,75 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> Mut<'w, T, Ticks> {
         *self.ticks.last_run_mut() = last_run;
         *self.ticks.this_run_mut() = this_run;
     }
+
+    /// Consumes this [`Mut`] and converts its ticks to another tick representation.
+    pub fn into_ticks<NewTicks>(self) -> Mut<'w, T, NewTicks>
+    where
+        NewTicks: ChangeTicksMut<'w>,
+        Ticks: Into<NewTicks>,
+    {
+        Mut {
+            value: self.value,
+            ticks: self.ticks.into(),
+        }
+    }
+
+    /// Converts this [`Mut`] to use summary-tick-aware tick storage.
+    ///
+    /// Whether the resulting value has a summary tick depends on the tick conversion. In
+    /// particular, converting [`ComponentTicksMut`] does not create a summary tick.
+    pub fn into_summarized(self) -> Mut<'w, T, ComponentTicksMutSumm<'w>> {
+        self.into_ticks()
+    }
+
+    /// Consumes `self` and returns the contained mutable reference, marking it as changed.
+    #[inline]
+    pub fn into_inner(mut self) -> &'w mut T {
+        self.set_changed();
+        self.value
+    }
+
+    /// Maps to an inner value without flagging a change.
+    ///
+    /// Do not modify the argument passed to the closure. To modify the data without flagging a
+    /// change, use [`DetectChangesMut::bypass_change_detection`] instead.
+    #[inline]
+    pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut T) -> &mut U) -> Mut<'w, U, Ticks> {
+        Mut {
+            value: f(self.value),
+            ticks: self.ticks,
+        }
+    }
+
+    /// Optionally maps to an inner value without flagging a change.
+    ///
+    /// Do not modify the argument passed to the closure.
+    #[inline]
+    pub fn filter_map_unchanged<U: ?Sized>(
+        self,
+        f: impl FnOnce(&mut T) -> Option<&mut U>,
+    ) -> Option<Mut<'w, U, Ticks>> {
+        let value = f(self.value);
+        value.map(|value| Mut {
+            value,
+            ticks: self.ticks,
+        })
+    }
+
+    /// Maps to an inner value without flagging a change, returning an error on failure.
+    ///
+    /// Do not modify the argument passed to the closure.
+    #[inline]
+    pub fn try_map_unchanged<U: ?Sized, E>(
+        self,
+        f: impl FnOnce(&mut T) -> Result<&mut U, E>,
+    ) -> Result<Mut<'w, U, Ticks>, E> {
+        let value = f(self.value);
+        value.map(|value| Mut {
+            value,
+            ticks: self.ticks,
+        })
+    }
 }
 
 impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> DetectChanges for Mut<'w, T, Ticks> {
@@ -1411,13 +1480,6 @@ impl<'w, T, Ticks: ChangeTicksMut<'w>> AsMut<T> for Mut<'w, T, Ticks> {
 }
 // these methods can only be implemented on concrete Ticks type
 impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMut<'w>> {
-    #[doc = r" Consume `self` and return a mutable reference to the"]
-    #[doc = r#" contained value while marking `self` as "changed"."#]
-    #[inline]
-    pub fn into_inner(mut self) -> &'w mut T {
-        self.set_changed();
-        self.value
-    }
     #[doc = r" Returns a `Mut<>` with a smaller lifetime."]
     #[doc = r" This is useful if you have `&mut"]
     #[doc = "Mut"]
@@ -1433,62 +1495,6 @@ impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMut<'w>> {
                 this_run: self.ticks.this_run,
             },
         }
-    }
-    #[doc = r" Maps to an inner value by applying a function to the contained reference, without flagging a change."]
-    #[doc = r""]
-    #[doc = r" You should never modify the argument passed to the closure -- if you want to modify the data"]
-    #[doc = r" without flagging a change, consider using [`DetectChangesMut::bypass_change_detection`] to make your intent explicit."]
-    #[doc = r""]
-    #[doc = r" ```"]
-    #[doc = r" # use bevy_ecs::prelude::*;"]
-    #[doc = r" # #[derive(PartialEq)] pub struct Vec2;"]
-    #[doc = r" # impl Vec2 { pub const ZERO: Self = Self; }"]
-    #[doc = r" # #[derive(Component)] pub struct Transform { translation: Vec2 }"]
-    #[doc = r" // When run, zeroes the translation of every entity."]
-    #[doc = r" fn reset_positions(mut transforms: Query<&mut Transform>) {"]
-    #[doc = r"     for transform in &mut transforms {"]
-    #[doc = r"         // We pinky promise not to modify `t` within the closure."]
-    #[doc = r"         // Breaking this promise will result in logic errors, but will never cause undefined behavior."]
-    #[doc = r"         let mut translation = transform.map_unchanged(|t| &mut t.translation);"]
-    #[doc = r"         // Only reset the translation if it isn't already zero;"]
-    #[doc = r"         translation.set_if_neq(Vec2::ZERO);"]
-    #[doc = r"     }"]
-    #[doc = r" }"]
-    #[doc = r" # bevy_ecs::system::assert_is_system(reset_positions);"]
-    #[doc = r" ```"]
-    pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut T) -> &mut U) -> Mut<'w, U> {
-        Mut {
-            value: f(self.value),
-            ticks: self.ticks,
-        }
-    }
-    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference."]
-    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
-    #[doc = r""]
-    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
-    pub fn filter_map_unchanged<U: ?Sized>(
-        self,
-        f: impl FnOnce(&mut T) -> Option<&mut U>,
-    ) -> Option<Mut<'w, U>> {
-        let value = f(self.value);
-        value.map(|value| Mut {
-            value,
-            ticks: self.ticks,
-        })
-    }
-    #[doc = r" Optionally maps to an inner value by applying a function to the contained reference, returns an error on failure."]
-    #[doc = r" This is useful in a situation where you need to convert a `Mut<T>` to a `Mut<U>`, but only if `T` contains `U`."]
-    #[doc = r""]
-    #[doc = r" As with `map_unchanged`, you should never modify the argument passed to the closure."]
-    pub fn try_map_unchanged<U: ?Sized, E>(
-        self,
-        f: impl FnOnce(&mut T) -> Result<&mut U, E>,
-    ) -> Result<Mut<'w, U>, E> {
-        let value = f(self.value);
-        value.map(|value| Mut {
-            value,
-            ticks: self.ticks,
-        })
     }
     #[doc = r" Allows you access to the dereferenced value of this pointer without immediately"]
     #[doc = r" triggering change detection."]
@@ -1757,9 +1763,10 @@ impl<'w, T> From<ContiguousMut<'w, T>> for ContiguousRef<'w, T> {
 
 impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> From<Mut<'w, T, Ticks>> for Ref<'w, T> {
     fn from(mut_ref: Mut<'w, T, Ticks>) -> Self {
+        let ticks: ComponentTicksMut<'w> = mut_ref.ticks.into();
         Self {
             value: mut_ref.value,
-            ticks: mut_ref.ticks.into().into(),
+            ticks: ticks.into(),
         }
     }
 }

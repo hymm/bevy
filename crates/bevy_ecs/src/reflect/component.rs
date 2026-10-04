@@ -382,9 +382,10 @@ impl<C: Component + Reflect + TypePath> CreateTypeData<C> for ReflectComponent {
 
                 // SAFETY: guard ensures `C` is a mutable component
                 unsafe {
-                    entity
-                        .into_mut_assume_mutable::<C>()
-                        .map(|c| c.map_unchanged(|value| value as &mut dyn Reflect))
+                    entity.into_mut_assume_mutable::<C>().map(|c| {
+                        c.map_unchanged(|value| value as &mut dyn Reflect)
+                            .into_ticks()
+                    })
                 }
             },
             reflect_unchecked_mut: |entity| {
@@ -398,7 +399,10 @@ impl<C: Component + Reflect + TypePath> CreateTypeData<C> for ReflectComponent {
                 // `reflect_unchecked_mut` which must be called with an UnsafeEntityCell with access to the component `C` on the `entity`
                 // guard ensures `C` is a mutable component
                 let c = unsafe { entity.get_mut_assume_mutable::<C>() };
-                c.map(|c| c.map_unchanged(|value| value as &mut dyn Reflect))
+                c.map(|c| {
+                    c.map_unchanged(|value| value as &mut dyn Reflect)
+                        .into_summarized()
+                })
             },
             register_component: |world: &mut World| -> ComponentId {
                 world.register_component::<C>()

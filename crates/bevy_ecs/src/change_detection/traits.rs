@@ -1,10 +1,12 @@
 use crate::change_detection::{
-    AtomicTick, ComponentTickCells, ComponentTicksMut, MaybeLocation, Tick,
+    AtomicTick, ComponentTickCells, ComponentTicksMut, ComponentTicksMutSumm, MaybeLocation, Tick,
 };
 use alloc::borrow::ToOwned;
 use core::{mem, panic::Location};
 
-pub trait ChangeTicksMut<'w>: Into<ComponentTicksMut<'w>> {
+pub trait ChangeTicksMut<'w>:
+    Into<ComponentTicksMut<'w>> + Into<ComponentTicksMutSumm<'w>>
+{
     fn new(
         added: &'w mut Tick,
         changed: &'w mut Tick,
