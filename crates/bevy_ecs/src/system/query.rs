@@ -2166,6 +2166,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// The caller must ensure that the query data returned for the entities does not conflict,
     /// either because they are all unique or because the data is read-only.
+    #[inline]
     unsafe fn get_many_impl<const N: usize>(
         self,
         entities: [Entity; N],
