@@ -2368,7 +2368,6 @@ impl<'a, T: Component<Mutability = Mutable>> EntityEntryCommands<'a, T> {
     /// Modify the component `T` if it exists, using the function `modify`.
     pub fn and_modify(
         &mut self,
-        // TODO: adding the for all 'b feels wrong
         modify: impl for<'b> FnOnce(Mut<'b, T, ComponentTicksMutSumm<'b>>) + Send + Sync + 'static,
     ) -> &mut Self {
         self.entity_commands
