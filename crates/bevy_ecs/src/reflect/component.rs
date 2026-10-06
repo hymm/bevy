@@ -123,7 +123,9 @@ pub struct ReflectComponentFns {
     /// Function pointer implementing [`ReflectComponent::reflect()`].
     pub reflect: for<'w> fn(FilteredEntityRef<'w, '_>) -> Option<&'w dyn Reflect>,
     /// Function pointer implementing [`ReflectComponent::reflect_mut()`].
-    pub reflect_mut: for<'w> fn(FilteredEntityMut<'w, '_>) -> Option<Mut<'w, dyn Reflect>>,
+    pub reflect_mut: for<'w> fn(
+        FilteredEntityMut<'w, '_>,
+    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutSumm<'w>>>,
     /// Function pointer implementing [`ReflectComponent::map_entities()`].
     pub map_entities: fn(&mut dyn Reflect, &mut dyn EntityMapper),
     /// Function pointer implementing [`ReflectComponent::reflect_unchecked_mut()`].
@@ -218,7 +220,7 @@ impl ReflectComponent {
     pub fn reflect_mut<'w, 's>(
         &self,
         entity: impl Into<FilteredEntityMut<'w, 's>>,
-    ) -> Option<Mut<'w, dyn Reflect>> {
+    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutSumm<'w>>> {
         (self.0.reflect_mut)(entity.into())
     }
 
@@ -384,7 +386,7 @@ impl<C: Component + Reflect + TypePath> CreateTypeData<C> for ReflectComponent {
                 unsafe {
                     entity.into_mut_assume_mutable::<C>().map(|c| {
                         c.map_unchanged(|value| value as &mut dyn Reflect)
-                            .into_ticks()
+                            .into_summarized()
                     })
                 }
             },

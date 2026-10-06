@@ -1289,24 +1289,15 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> Mut<'w, T, Ticks> {
         *self.ticks.this_run_mut() = this_run;
     }
 
-    /// Consumes this [`Mut`] and converts its ticks to another tick representation.
-    pub fn into_ticks<NewTicks>(self) -> Mut<'w, T, NewTicks>
-    where
-        NewTicks: ChangeTicksMut<'w>,
-        Ticks: Into<NewTicks>,
-    {
+    /// Converts this [`Mut`] to use [`ComponentTicksMutSumm`].
+    ///
+    /// Note that this will not add the summary ticks if not already present. This method is
+    /// mainly for type compatibility purposes.
+    pub fn into_summarized(self) -> Mut<'w, T, ComponentTicksMutSumm<'w>> {
         Mut {
             value: self.value,
             ticks: self.ticks.into(),
         }
-    }
-
-    /// Converts this [`Mut`] to use summary-tick-aware tick storage.
-    ///
-    /// Whether the resulting value has a summary tick depends on the tick conversion. In
-    /// particular, converting [`ComponentTicksMut`] does not create a summary tick.
-    pub fn into_summarized(self) -> Mut<'w, T, ComponentTicksMutSumm<'w>> {
-        self.into_ticks()
     }
 
     /// Consumes `self` and returns the contained mutable reference, marking it as changed.
@@ -1480,10 +1471,8 @@ impl<'w, T, Ticks: ChangeTicksMut<'w>> AsMut<T> for Mut<'w, T, Ticks> {
 }
 // these methods can only be implemented on concrete Ticks type
 impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMut<'w>> {
-    #[doc = r" Returns a `Mut<>` with a smaller lifetime."]
-    #[doc = r" This is useful if you have `&mut"]
-    #[doc = "Mut"]
-    #[doc = r" <T>`, but you need a `Mut<T>`."]
+    /// Returns a `Mut<T>` with a smaller lifetime
+    /// This is useful if you have `&mut Mut<T>`, but you need a `Mut<T>`
     pub fn reborrow(&mut self) -> Mut<'_, T> {
         Mut {
             value: self.value,
@@ -1496,9 +1485,37 @@ impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMut<'w>> {
             },
         }
     }
-    #[doc = r" Allows you access to the dereferenced value of this pointer without immediately"]
-    #[doc = r" triggering change detection."]
+
+    /// Allows you access to the dereferenced value of this pointer without immediately
+    /// triggering change detection.
     pub fn as_deref_mut(&mut self) -> Mut<'_, <T as Deref>::Target>
+    where
+        T: DerefMut,
+    {
+        self.reborrow().map_unchanged(|v| v.deref_mut())
+    }
+}
+// these methods can only be implemented on concrete Ticks type
+impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMutSumm<'w>> {
+    /// Returns a `Mut<T>` with a smaller lifetime
+    /// This is useful if you have `&mut Mut<T>`, but you need a `Mut<T>`
+    pub fn reborrow(&mut self) -> Mut<'_, T, ComponentTicksMutSumm<'_>> {
+        Mut {
+            value: self.value,
+            ticks: ComponentTicksMutSumm {
+                added: self.ticks.added,
+                changed: self.ticks.changed,
+                changed_by: self.ticks.changed_by.as_deref_mut(),
+                last_run: self.ticks.last_run,
+                this_run: self.ticks.this_run,
+                summary_tick: self.ticks.summary_tick,
+            },
+        }
+    }
+
+    /// Allows you access to the dereferenced value of this pointer without immediately
+    /// triggering change detection.
+    pub fn as_deref_mut(&mut self) -> Mut<'_, <T as Deref>::Target, ComponentTicksMutSumm<'_>>
     where
         T: DerefMut,
     {
