@@ -17,15 +17,15 @@ pub trait ChangeTicksMut<'w>:
     ) -> Self;
 
     fn added(&self) -> Tick;
-    fn added_mut(&mut self) -> &mut Tick;
+    fn set_added(&mut self, new_tick: Tick);
     fn changed(&self) -> Tick;
-    fn changed_mut(&mut self) -> &mut Tick;
+    fn set_changed(&mut self, new_tick: Tick);
     fn changed_by(&self) -> MaybeLocation;
-    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>>;
+    fn set_changed_by(&mut self, changed_by: MaybeLocation);
     fn last_run(&self) -> Tick;
-    fn last_run_mut(&mut self) -> &mut Tick;
+    fn set_last_run(&mut self, last_run: Tick);
     fn this_run(&self) -> Tick;
-    fn this_run_mut(&mut self) -> &mut Tick;
+    fn set_this_run(&mut self, this_run: Tick);
     fn summary_tick(&self) -> Option<&AtomicTick>;
     unsafe fn from_tick_cells(
         cells: ComponentTickCells<'w>,

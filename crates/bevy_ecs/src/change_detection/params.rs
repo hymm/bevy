@@ -291,28 +291,28 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMut<'w> {
         }
     }
 
-    fn added_mut(&mut self) -> &mut Tick {
-        self.added
+    fn set_added(&mut self, new_tick: Tick) {
+        *self.added = new_tick;
     }
 
-    fn changed_mut(&mut self) -> &mut Tick {
-        self.changed
+    fn set_changed(&mut self, new_tick: Tick) {
+        *self.changed = new_tick;
     }
 
     fn changed_by(&self) -> MaybeLocation<&'static Location<'static>> {
         self.changed_by.copied()
     }
 
-    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>> {
-        self.changed_by.as_deref_mut()
+    fn set_changed_by(&mut self, changed_by: MaybeLocation) {
+        self.changed_by.assign(changed_by);
     }
 
-    fn last_run_mut(&mut self) -> &mut Tick {
-        &mut self.last_run
+    fn set_last_run(&mut self, last_run: Tick) {
+        self.last_run = last_run;
     }
 
-    fn this_run_mut(&mut self) -> &mut Tick {
-        &mut self.this_run
+    fn set_this_run(&mut self, this_run: Tick) {
+        self.this_run = this_run;
     }
 
     fn added(&self) -> Tick {
@@ -433,28 +433,28 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMutSumm<'w> {
         }
     }
 
-    fn added_mut(&mut self) -> &mut Tick {
-        self.added
+    fn set_added(&mut self, new_tick: Tick) {
+        *self.added = new_tick;
     }
 
-    fn changed_mut(&mut self) -> &mut Tick {
-        self.changed
+    fn set_changed(&mut self, new_tick: Tick) {
+        *self.changed = new_tick;
     }
 
     fn changed_by(&self) -> MaybeLocation<&'static Location<'static>> {
         self.changed_by.copied()
     }
 
-    fn changed_by_mut(&mut self) -> MaybeLocation<&mut &'static Location<'static>> {
-        self.changed_by.as_deref_mut()
+    fn set_changed_by(&mut self, changed_by: MaybeLocation) {
+        self.changed_by.assign(changed_by);
     }
 
-    fn last_run_mut(&mut self) -> &mut Tick {
-        &mut self.last_run
+    fn set_last_run(&mut self, last_run: Tick) {
+        self.last_run = last_run;
     }
 
-    fn this_run_mut(&mut self) -> &mut Tick {
-        &mut self.this_run
+    fn set_this_run(&mut self, this_run: Tick) {
+        self.this_run = this_run;
     }
 
     fn added(&self) -> Tick {
@@ -500,6 +500,87 @@ impl<'w> From<ComponentTicksMutSumm<'w>> for ComponentTicksMut<'w> {
         }
     }
 }
+
+// struct NoChangeDetection;
+
+// impl<'w> ChangeTicksMut<'w> for NoChangeDetection {
+//     fn new(
+//         _added: &'w mut Tick,
+//         _changed: &'w mut Tick,
+//         _summary_tick: Option<&'w AtomicTick>,
+//         _last_run: Tick,
+//         _this_run: Tick,
+//         _caller: MaybeLocation<&'w mut &'static Location<'static>>,
+//     ) -> Self {
+//         NoChangeDetection
+//     }
+
+//     fn added(&self) -> Tick {
+//         Tick::default()
+//     }
+
+//     fn set_added(&mut self, _new_tick: Tick) {}
+
+//     fn changed(&self) -> Tick {
+//         Tick::default()
+//     }
+
+//     fn set_changed(&mut self, _new_tick: Tick) {}
+
+//     fn changed_by(&self) -> MaybeLocation {
+//         // TODO: not sure this is correct. Ideally it'd be more of a null value. or explain that it has never changed
+//         MaybeLocation::caller()
+//     }
+
+//     fn set_changed_by(&mut self, _changed_by: MaybeLocation) {}
+
+//     fn last_run(&self) -> Tick {
+//         Tick::default()
+//     }
+
+//     fn set_last_run(&mut self, _last_run: Tick) {}
+
+//     fn this_run(&self) -> Tick {
+//         Tick::default()
+//     }
+
+//     fn set_this_run(&mut self, _this_run: Tick) {}
+
+//     fn summary_tick(&self) -> Option<&AtomicTick> {
+//         None
+//     }
+
+//     unsafe fn from_tick_cells(
+//         _cells: ComponentTickCells<'w>,
+//         _last_run: Tick,
+//         _this_run: Tick,
+//     ) -> Self {
+//         NoChangeDetection
+//     }
+// }
+// impl From<NoChangeDetection> for ComponentTicksMut<'_> {
+//     fn from(_: NoChangeDetection) -> Self {
+//         ComponentTicksMut {
+//             added: &mut Tick::default(),
+//             changed: &mut Tick::default(),
+//             changed_by: MaybeLocation::caller(),
+//             last_run: Tick::default(),
+//             this_run: Tick::default(),
+//         }
+//     }
+// }
+// impl From<NoChangeDetection> for ComponentTicksMutSumm<'_> {
+//     fn from(_: NoChangeDetection) -> Self {
+//         ComponentTicksMutSumm {
+//             added: &mut Tick::default(),
+//             changed: &mut Tick::default(),
+//             last_run: Tick::default(),
+//             this_run: Tick::default(),
+//             changed_by: MaybeLocation::caller(),
+//             summary_tick: None,
+//         }
+//     }
+// }
 
 /// Data type storing contiguously lying ticks, which may be accessed to mutate.
 ///
@@ -1285,8 +1366,8 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> Mut<'w, T, Ticks> {
     /// This is an advanced feature. `Mut`s are usually _created_ by engine-internal code and
     /// _consumed_ by end-user code.
     pub fn set_ticks(&mut self, last_run: Tick, this_run: Tick) {
-        *self.ticks.last_run_mut() = last_run;
-        *self.ticks.this_run_mut() = this_run;
+        self.ticks.set_last_run(last_run);
+        self.ticks.set_this_run(this_run);
     }
 
     /// Converts this [`Mut`] to use [`ComponentTicksMutSumm`].
@@ -1410,27 +1491,29 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> DetectChangesMut for Mut<'w, T, T
     #[inline]
     #[track_caller]
     fn set_changed(&mut self) {
-        *self.ticks.changed_mut() = self.ticks.this_run();
-        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        let this_run = self.ticks.this_run();
+        self.ticks.set_changed(this_run);
+        self.ticks.set_changed_by(MaybeLocation::caller());
         if let Some(summary_tick) = self.ticks.summary_tick() {
-            summary_tick.set(self.ticks.this_run());
+            summary_tick.set(this_run);
         }
     }
     #[inline]
     #[track_caller]
     fn set_added(&mut self) {
-        *self.ticks.changed_mut() = self.ticks.this_run();
-        *self.ticks.added_mut() = self.ticks.this_run();
-        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        let this_run = self.ticks.this_run();
+        self.ticks.set_changed(this_run);
+        self.ticks.set_added(this_run);
+        self.ticks.set_changed_by(MaybeLocation::caller());
         if let Some(summary_tick) = self.ticks.summary_tick() {
-            summary_tick.set(self.ticks.this_run());
+            summary_tick.set(this_run);
         }
     }
     #[inline]
     #[track_caller]
     fn set_last_changed(&mut self, last_changed: Tick) {
-        *self.ticks.changed_mut() = last_changed;
-        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        self.ticks.set_changed(last_changed);
+        self.ticks.set_changed_by(MaybeLocation::caller());
         if let Some(summary_tick) = self.ticks.summary_tick()
             && self.is_changed_after(summary_tick.get())
         {
@@ -1440,9 +1523,9 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> DetectChangesMut for Mut<'w, T, T
     #[inline]
     #[track_caller]
     fn set_last_added(&mut self, last_added: Tick) {
-        *self.ticks.added_mut() = last_added;
-        *self.ticks.changed_mut() = last_added;
-        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        self.ticks.set_added(last_added);
+        self.ticks.set_changed(last_added);
+        self.ticks.set_changed_by(MaybeLocation::caller());
         if let Some(summary_tick) = self.ticks.summary_tick()
             && self.is_changed_after(summary_tick.get())
         {
@@ -1459,7 +1542,7 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> DerefMut for Mut<'w, T, Ticks> {
     #[track_caller]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.set_changed();
-        self.ticks.changed_by_mut().assign(MaybeLocation::caller());
+        self.ticks.set_changed_by(MaybeLocation::caller());
         self.value
     }
 }

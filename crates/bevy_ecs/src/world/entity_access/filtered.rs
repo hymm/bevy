@@ -4,7 +4,6 @@ use crate::{
     component::{Component, ComponentId, Mutable},
     entity::{ContainsEntity, Entity, EntityEquivalent, EntityLocation},
     query::Access,
-    schedule::Chain,
     world::{unsafe_world_cell::UnsafeEntityCell, EntityMut, EntityRef, Mut, Ref, WorldId},
 };
 

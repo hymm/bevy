@@ -2,9 +2,8 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundle,
     change_detection::{
-        AtomicTick, ChangeTicksMut, ComponentTicksMut, ComponentTicksRef,
-        ContiguousComponentTicksMut, ContiguousComponentTicksRef, ContiguousMut, ContiguousRef,
-        MaybeLocation, Tick,
+        AtomicTick, ChangeTicksMut, ComponentTicksRef, ContiguousComponentTicksMut,
+        ContiguousComponentTicksRef, ContiguousMut, ContiguousRef, MaybeLocation, Tick,
     },
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entities, Entity, EntityLocation},
