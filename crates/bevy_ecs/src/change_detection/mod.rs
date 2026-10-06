@@ -1,14 +1,16 @@
 //! Types that detect when their internal data mutate.
 
+mod component_ticks;
 mod maybe_location;
 mod params;
 mod tick;
 mod traits;
 
+pub use component_ticks::{ChangeTicksMut, ComponentTicksMut, ComponentTicksMutSumm};
 pub use maybe_location::MaybeLocation;
 pub use params::*;
 pub use tick::*;
-pub use traits::{ChangeTicksMut, DetectChanges, DetectChangesMut};
+pub use traits::{DetectChanges, DetectChangesMut};
 
 /// The (arbitrarily chosen) minimum number of world tick increments between `check_tick` scans.
 ///
