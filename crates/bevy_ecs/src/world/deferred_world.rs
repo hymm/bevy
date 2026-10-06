@@ -4,7 +4,7 @@ use bevy_utils::prelude::DebugName;
 
 use crate::{
     archetype::Archetype,
-    change_detection::{MaybeLocation, MutUntyped, Tick},
+    change_detection::{ChangeTicksMut, MaybeLocation, MutUntyped, Tick},
     component::{ComponentId, Mutable},
     entity::Entity,
     event::{EntityComponentsTrigger, Event, EventKey, EventTriggerState, Trigger},
@@ -199,7 +199,7 @@ impl<'w> DeferredWorld<'w> {
         let result = f(component.reborrow());
 
         // Simulate adding this component by updating the relevant ticks
-        *component.ticks.added = *component.ticks.changed;
+        component.ticks.set_added(component.ticks.changed());
 
         // SAFETY:
         // - DeferredWorld ensures archetype pointer will remain valid as no

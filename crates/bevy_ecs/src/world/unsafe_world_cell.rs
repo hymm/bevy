@@ -5,7 +5,7 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{
-        ChangeTicksMut, ComponentTickCells, ComponentTicks, ComponentTicksMutSumm,
+        ChangeTicksMut, ComponentTickCells, ComponentTicks, ComponentTicksMutDynamic,
         ComponentTicksRef, MaybeLocation, MutUntyped, Tick,
     },
     component::{ComponentId, Components, Mutable, StorageType},
@@ -583,7 +583,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.get_resource_mut_by_id(component_id)
                 // `component_id` was gotten from `TypeId::of::<R>()`
-                .map(|ptr| ptr.with_type::<R>())
+                .map(|ptr| ptr.with_type::<R>().into_ticks_type())
         }
     }
 
@@ -626,7 +626,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.get_resource_mut_by_id(component_id)
                 // `component_id` was gotten from `TypeId::of::<R>()`
-                .map(|ptr| ptr.with_type::<R>())
+                .map(|ptr| ptr.with_type::<R>().into_ticks_type())
         }
     }
 
@@ -646,7 +646,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.get_non_send_mut_by_id(component_id)
                 // SAFETY: `component_id` was gotten by `TypeId::of::<R>()`
-                .map(|ptr| ptr.with_type::<R>())
+                .map(|ptr| ptr.with_type::<R>().into_ticks_type())
         }
     }
 
@@ -683,7 +683,7 @@ impl<'w> UnsafeWorldCell<'w> {
             // - index is in-bounds because the column is initialized and non-empty
             // - no other reference to the ticks of the same row can exist at the same time
             unsafe {
-                ComponentTicksMutSumm::from_tick_cells(ticks, self.last_change_tick(), change_tick)
+                ComponentTicksMutDynamic::from_tick_cells(ticks, self.last_change_tick(), change_tick)
             };
 
         Some(MutUntyped {
@@ -1208,7 +1208,7 @@ impl<'w> UnsafeEntityCell<'w> {
                 MutUntyped {
                     // SAFETY: world access validated by caller and ties world lifetime to `MutUntyped` lifetime
                     value: value.assert_unique(),
-                    ticks: ComponentTicksMutSumm::from_tick_cells(
+                    ticks: ComponentTicksMutDynamic::from_tick_cells(
                         cells,
                         self.last_run,
                         self.this_run,
@@ -1257,7 +1257,7 @@ impl<'w> UnsafeEntityCell<'w> {
                 MutUntyped {
                     // SAFETY: world access validated by caller and ties world lifetime to `MutUntyped` lifetime
                     value: value.assert_unique(),
-                    ticks: ComponentTicksMutSumm::from_tick_cells(
+                    ticks: ComponentTicksMutDynamic::from_tick_cells(
                         cells,
                         self.last_run,
                         self.this_run,

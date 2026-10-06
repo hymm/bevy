@@ -17,7 +17,7 @@ use core::marker::PhantomData;
 
 use crate::{
     bundle::{Bundle, InsertMode, NoBundleEffect},
-    change_detection::{ComponentTicksMutSumm, MaybeLocation, Mut},
+    change_detection::{ComponentTicksMutDynamic, MaybeLocation, Mut},
     component::{Component, ComponentId, Mutable},
     entity::{
         Entities, Entity, EntityAllocator, EntityClonerBuilder, EntityNotSpawnedError,
@@ -2368,12 +2368,12 @@ impl<'a, T: Component<Mutability = Mutable>> EntityEntryCommands<'a, T> {
     /// Modify the component `T` if it exists, using the function `modify`.
     pub fn and_modify(
         &mut self,
-        modify: impl for<'b> FnOnce(Mut<'b, T, ComponentTicksMutSumm<'b>>) + Send + Sync + 'static,
+        modify: impl for<'b> FnOnce(Mut<'b, T, ComponentTicksMutDynamic<'b>>) + Send + Sync + 'static,
     ) -> &mut Self {
         self.entity_commands
             .queue(move |mut entity: EntityWorldMut| {
                 if let Some(value) = entity.get_mut::<T>() {
-                    modify(value.into_summarized());
+                    modify(value.into_ticks_type());
                 }
             });
         self

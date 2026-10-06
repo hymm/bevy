@@ -6,7 +6,9 @@ mod params;
 mod tick;
 mod traits;
 
-pub use component_ticks::{ChangeTicksMut, ComponentTicksMut, ComponentTicksMutSumm};
+pub use component_ticks::{
+    ChangeTicksMut, ComponentTicksMut, ComponentTicksMutDynamic, ComponentTicksMutSumm,
+};
 pub use maybe_location::MaybeLocation;
 pub use params::*;
 pub use tick::*;
@@ -36,8 +38,9 @@ mod tests {
 
     use crate::{
         change_detection::{
-            AtomicTick, ComponentTicks, ComponentTicksMut, ComponentTicksMutSumm, MaybeLocation,
-            Mut, NonSendMut, Ref, ResMut, Tick, CHECK_TICK_THRESHOLD, MAX_CHANGE_AGE,
+            component_ticks::TickRefs, AtomicTick, ComponentTicks, ComponentTicksMut,
+            ComponentTicksMutDynamic, MaybeLocation, Mut, NonSendMut, Ref, ResMut, Tick,
+            CHECK_TICK_THRESHOLD, MAX_CHANGE_AGE,
         },
         component::Component,
         system::{IntoSystem, Single, System},
@@ -331,10 +334,12 @@ mod tests {
         };
         let mut caller = MaybeLocation::caller();
         let summary_tick = AtomicTick::default();
-        let ticks = ComponentTicksMutSumm {
-            added: &mut component_ticks.added,
-            changed: &mut component_ticks.changed,
-            changed_by: caller.as_mut(),
+        let ticks = ComponentTicksMutDynamic {
+            refs: TickRefs::Ticks {
+                added: &mut component_ticks.added,
+                changed: &mut component_ticks.changed,
+                changed_by: caller.as_mut(),
+            },
             last_run,
             this_run,
             summary_tick: Some(&summary_tick),
@@ -383,8 +388,8 @@ mod tests {
         };
 
         let into_mut: MutUntyped = mut_typed.into();
-        assert_eq!(1, into_mut.ticks.added.get());
-        assert_eq!(2, into_mut.ticks.changed.get());
+        assert_eq!(1, into_mut.added().get());
+        assert_eq!(2, into_mut.last_changed().get());
         assert_eq!(3, into_mut.ticks.last_run.get());
         assert_eq!(4, into_mut.ticks.this_run.get());
     }

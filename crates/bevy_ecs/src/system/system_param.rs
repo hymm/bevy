@@ -952,15 +952,12 @@ unsafe impl<'a, T: Resource<Mutability = Mutable>> SystemParam for ResMut<'a, T>
         let value = world.get_resource_mut_by_id(component_id).ok_or_else(|| {
             SystemParamValidationError::invalid::<Self>("Resource does not exist")
         })?;
+        let mut ticks: ComponentTicksMut<'_> = value.ticks.into();
+        ticks.set_last_run(system_meta.last_run);
+        ticks.set_this_run(change_tick);
         Ok(ResMut {
             value: value.value.deref_mut::<T>(),
-            ticks: ComponentTicksMut {
-                added: value.ticks.added,
-                changed: value.ticks.changed,
-                changed_by: value.ticks.changed_by,
-                last_run: system_meta.last_run,
-                this_run: change_tick,
-            },
+            ticks,
         })
     }
 }

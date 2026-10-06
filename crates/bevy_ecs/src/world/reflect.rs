@@ -189,7 +189,7 @@ impl World {
             reflect_from_ptr.ptr_as_reflect_mut(ptr_mut)
         });
 
-        Ok(comp_mut_typed)
+        Ok(comp_mut_typed.into_ticks_type())
     }
 
     /// Inserts a reflected resource into the world. If the resource already exists, it is overwritten.

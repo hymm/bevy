@@ -1,7 +1,7 @@
 use crate::{
     change_detection::{
-        traits::*, AtomicTick, ChangeTicksMut, ComponentTickCells, ComponentTicksMut,
-        ComponentTicksMutSumm, MaybeLocation, Tick,
+        component_ticks::ComponentTicksMutDynamic, traits::*, AtomicTick, ChangeTicksMut,
+        ComponentTickCells, ComponentTicksMut, ComponentTicksMutSumm, MaybeLocation, Tick,
     },
     component::Mutable,
     ptr::PtrMut,
@@ -1036,11 +1036,11 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> Mut<'w, T, Ticks> {
         self.ticks.set_this_run(this_run);
     }
 
-    /// Converts this [`Mut`] to use [`ComponentTicksMutSumm`].
-    ///
-    /// Note that this will not add the summary ticks if not already present. This method is
-    /// mainly for type compatibility purposes.
-    pub fn into_summarized(self) -> Mut<'w, T, ComponentTicksMutSumm<'w>> {
+    pub fn into_ticks_type<NewTicks>(self) -> Mut<'w, T, NewTicks>
+    where
+        Ticks: Into<NewTicks>,
+        NewTicks: ChangeTicksMut<'w>,
+    {
         Mut {
             value: self.value,
             ticks: self.ticks.into(),
@@ -1271,7 +1271,6 @@ impl<'w, T: ?Sized> Mut<'w, T, ComponentTicksMutSumm<'w>> {
         self.reborrow().map_unchanged(|v| v.deref_mut())
     }
 }
-
 impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> core::fmt::Debug for Mut<'w, T, Ticks>
 where
     T: core::fmt::Debug,
@@ -1529,7 +1528,7 @@ impl<'w, T> From<ContiguousMut<'w, T>> for ContiguousRef<'w, T> {
 
 impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> From<Mut<'w, T, Ticks>> for Ref<'w, T> {
     fn from(value: Mut<'w, T, Ticks>) -> Self {
-        let ticks: ComponentTicksMut<'w> = value.ticks.into();
+        let ticks: ComponentTicksMutDynamic<'w> = value.ticks.into();
         Self {
             value: value.value,
             ticks: ticks.into(),
@@ -1572,7 +1571,7 @@ where
 /// or are defined outside of rust this can be used.
 pub struct MutUntyped<'w> {
     pub(crate) value: PtrMut<'w>,
-    pub(crate) ticks: ComponentTicksMutSumm<'w>,
+    pub(crate) ticks: ComponentTicksMutDynamic<'w>,
 }
 
 impl<'w> MutUntyped<'w> {
@@ -1591,21 +1590,16 @@ impl<'w> MutUntyped<'w> {
     pub fn reborrow(&mut self) -> MutUntyped<'_> {
         MutUntyped {
             value: self.value.reborrow(),
-            ticks: ComponentTicksMutSumm {
-                added: self.ticks.added,
-                changed: self.ticks.changed,
-                changed_by: self.ticks.changed_by.as_deref_mut(),
-                last_run: self.ticks.last_run,
-                this_run: self.ticks.this_run,
-                summary_tick: self.ticks.summary_tick,
-            },
+            ticks: self.ticks.reborrow(),
         }
     }
 
     /// Returns `true` if this value was changed or mutably dereferenced
     /// either since a specific change tick.
     pub fn has_changed_since(&self, tick: Tick) -> bool {
-        self.ticks.changed.is_newer_than(tick, self.ticks.this_run)
+        self.ticks
+            .changed()
+            .is_newer_than(tick, self.ticks.this_run())
     }
 
     /// Returns a pointer to the value without taking ownership of this smart pointer, marking it as changed.
@@ -1645,10 +1639,13 @@ impl<'w> MutUntyped<'w> {
     /// // SAFETY: from the context it is known that `ReflectFromPtr` was made for the type of the `MutUntyped`
     /// mut_untyped.map_unchanged(|ptr| unsafe { reflect_from_ptr.ptr_as_reflect_mut(ptr) });
     /// ```
-    pub fn map_unchanged<T: ?Sized>(self, f: impl FnOnce(PtrMut<'w>) -> &'w mut T) -> Mut<'w, T> {
+    pub fn map_unchanged<T: ?Sized>(
+        self,
+        f: impl FnOnce(PtrMut<'w>) -> &'w mut T,
+    ) -> Mut<'w, T, ComponentTicksMutDynamic<'w>> {
         Mut {
             value: f(self.value),
-            ticks: self.ticks.into(),
+            ticks: self.ticks,
         }
     }
 
@@ -1656,11 +1653,11 @@ impl<'w> MutUntyped<'w> {
     ///
     /// # Safety
     /// - `T` must be the erased pointee type for this [`MutUntyped`].
-    pub unsafe fn with_type<T>(self) -> Mut<'w, T> {
+    pub unsafe fn with_type<T>(self) -> Mut<'w, T, ComponentTicksMutDynamic<'w>> {
         Mut {
             // SAFETY: `value` is `Aligned` and caller ensures the pointee type is `T`.
             value: unsafe { self.value.deref_mut() },
-            ticks: self.ticks.into(),
+            ticks: self.ticks,
         }
     }
 }
@@ -1668,47 +1665,51 @@ impl<'w> MutUntyped<'w> {
 impl<'w> DetectChanges for MutUntyped<'w> {
     #[inline]
     fn is_added(&self) -> bool {
-        self.is_added_after(self.ticks.last_run)
+        self.is_added_after(self.ticks.last_run())
     }
 
     #[inline]
     fn is_changed(&self) -> bool {
-        self.is_changed_after(self.ticks.last_run)
+        self.is_changed_after(self.ticks.last_run())
     }
 
     #[inline]
     fn is_added_after(&self, other: Tick) -> bool {
-        self.ticks.added.is_newer_than(other, self.ticks.this_run)
+        self.ticks
+            .added()
+            .is_newer_than(other, self.ticks.this_run())
     }
 
     #[inline]
     fn is_changed_after(&self, other: Tick) -> bool {
-        self.ticks.changed.is_newer_than(other, self.ticks.this_run)
+        self.ticks
+            .changed()
+            .is_newer_than(other, self.ticks.this_run())
     }
 
     #[inline]
     fn last_changed(&self) -> Tick {
-        *self.ticks.changed
+        self.ticks.changed()
     }
 
     #[inline]
     fn changed_by(&self) -> MaybeLocation {
-        self.ticks.changed_by.copied()
+        self.ticks.changed_by()
     }
 
     #[inline]
     fn added(&self) -> Tick {
-        *self.ticks.added
+        self.ticks.added()
     }
 
     #[inline]
     fn this_run(&self) -> Tick {
-        self.ticks.this_run
+        self.ticks.this_run()
     }
 
     #[inline]
     fn last_run(&self) -> Tick {
-        self.ticks.last_run
+        self.ticks.last_run()
     }
 }
 
@@ -1718,47 +1719,37 @@ impl<'w> DetectChangesMut for MutUntyped<'w> {
     #[inline]
     #[track_caller]
     fn set_changed(&mut self) {
-        *self.ticks.changed = self.ticks.this_run;
-        self.ticks.changed_by.assign(MaybeLocation::caller());
-        if let Some(summary_tick) = self.ticks.summary_tick {
-            summary_tick.set(self.ticks.this_run);
+        self.ticks.set_changed(self.ticks.this_run());
+        self.ticks.set_changed_by(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick() {
+            summary_tick.set(self.ticks.this_run());
         }
     }
 
     #[inline]
     #[track_caller]
     fn set_added(&mut self) {
-        *self.ticks.changed = self.ticks.this_run;
-        *self.ticks.added = self.ticks.this_run;
-        self.ticks.changed_by.assign(MaybeLocation::caller());
-        if let Some(summary_tick) = self.ticks.summary_tick {
-            summary_tick.set(self.ticks.this_run);
-        }
+        self.ticks.set_added(self.ticks.this_run());
+        self.set_changed();
     }
 
     #[inline]
     #[track_caller]
     fn set_last_changed(&mut self, last_changed: Tick) {
-        *self.ticks.changed = last_changed;
-        self.ticks.changed_by.assign(MaybeLocation::caller());
-        if let Some(summary_tick) = self.ticks.summary_tick
+        self.ticks.set_changed(last_changed);
+        self.ticks.set_changed_by(MaybeLocation::caller());
+        if let Some(summary_tick) = self.ticks.summary_tick()
             && self.is_changed_after(summary_tick.get())
         {
-            summary_tick.set(self.ticks.this_run);
+            summary_tick.set(self.ticks.this_run());
         }
     }
 
     #[inline]
     #[track_caller]
     fn set_last_added(&mut self, last_added: Tick) {
-        *self.ticks.added = last_added;
-        *self.ticks.changed = last_added;
-        self.ticks.changed_by.assign(MaybeLocation::caller());
-        if let Some(summary_tick) = self.ticks.summary_tick
-            && self.is_changed_after(summary_tick.get())
-        {
-            summary_tick.set(self.ticks.this_run);
-        }
+        self.ticks.set_added(last_added);
+        self.set_last_changed(last_added);
     }
 
     #[inline]

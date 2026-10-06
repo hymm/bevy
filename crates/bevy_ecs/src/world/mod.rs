@@ -2393,7 +2393,7 @@ impl World {
             .into_mut_by_id(resource_id)
             .expect("Resource must exist");
         // SAFETY: resource is of type R
-        unsafe { untyped.with_type() }
+        unsafe { untyped.with_type::<R>().into_ticks_type() }
     }
 
     /// Gets a mutable reference to the resource of type `T` if it exists,
@@ -2439,7 +2439,7 @@ impl World {
             .into_mut_by_id(resource_id)
             .expect("Resource must exist");
         // SAFETY: resource is of type R
-        unsafe { untyped.with_type() }
+        unsafe { untyped.with_type::<R>().into_ticks_type() }
     }
 
     /// Retrieves the [`Entity`] associated with the resource of type `R`, if it exists.

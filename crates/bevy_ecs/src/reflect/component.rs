@@ -59,7 +59,7 @@
 
 use super::from_reflect_with_fallback;
 use crate::{
-    change_detection::{ComponentTicksMutSumm, Mut},
+    change_detection::{ComponentTicksMutDynamic, Mut},
     component::{ComponentId, ComponentMutability},
     entity::{Entity, EntityMapper},
     prelude::Component,
@@ -125,7 +125,7 @@ pub struct ReflectComponentFns {
     /// Function pointer implementing [`ReflectComponent::reflect_mut()`].
     pub reflect_mut: for<'w> fn(
         FilteredEntityMut<'w, '_>,
-    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutSumm<'w>>>,
+    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutDynamic<'w>>>,
     /// Function pointer implementing [`ReflectComponent::map_entities()`].
     pub map_entities: fn(&mut dyn Reflect, &mut dyn EntityMapper),
     /// Function pointer implementing [`ReflectComponent::reflect_unchecked_mut()`].
@@ -133,7 +133,9 @@ pub struct ReflectComponentFns {
     /// # Safety
     /// The function may only be called with an [`UnsafeEntityCell`] that can be used to mutably access the relevant component on the given entity.
     pub reflect_unchecked_mut:
-        unsafe fn(UnsafeEntityCell<'_>) -> Option<Mut<'_, dyn Reflect, ComponentTicksMutSumm<'_>>>,
+        unsafe fn(
+            UnsafeEntityCell<'_>,
+        ) -> Option<Mut<'_, dyn Reflect, ComponentTicksMutDynamic<'_>>>,
     /// Function pointer implementing [`ReflectComponent::copy()`].
     pub copy: fn(&World, &mut World, Entity, Entity, &TypeRegistry),
     /// Function pointer implementing [`ReflectComponent::register_component()`].
@@ -220,7 +222,7 @@ impl ReflectComponent {
     pub fn reflect_mut<'w, 's>(
         &self,
         entity: impl Into<FilteredEntityMut<'w, 's>>,
-    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutSumm<'w>>> {
+    ) -> Option<Mut<'w, dyn Reflect, ComponentTicksMutDynamic<'w>>> {
         (self.0.reflect_mut)(entity.into())
     }
 
@@ -236,7 +238,7 @@ impl ReflectComponent {
     pub unsafe fn reflect_unchecked_mut<'a>(
         &self,
         entity: UnsafeEntityCell<'a>,
-    ) -> Option<Mut<'a, dyn Reflect, ComponentTicksMutSumm<'a>>> {
+    ) -> Option<Mut<'a, dyn Reflect, ComponentTicksMutDynamic<'a>>> {
         // SAFETY: safety requirements deferred to caller
         unsafe { (self.0.reflect_unchecked_mut)(entity) }
     }
@@ -386,7 +388,7 @@ impl<C: Component + Reflect + TypePath> CreateTypeData<C> for ReflectComponent {
                 unsafe {
                     entity.into_mut_assume_mutable::<C>().map(|c| {
                         c.map_unchanged(|value| value as &mut dyn Reflect)
-                            .into_summarized()
+                            .into_ticks_type()
                     })
                 }
             },
@@ -403,7 +405,7 @@ impl<C: Component + Reflect + TypePath> CreateTypeData<C> for ReflectComponent {
                 let c = unsafe { entity.get_mut_assume_mutable::<C>() };
                 c.map(|c| {
                     c.map_unchanged(|value| value as &mut dyn Reflect)
-                        .into_summarized()
+                        .into_ticks_type()
                 })
             },
             register_component: |world: &mut World| -> ComponentId {
