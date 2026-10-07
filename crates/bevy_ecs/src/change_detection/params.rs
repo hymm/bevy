@@ -1036,6 +1036,7 @@ impl<'w, T: ?Sized, Ticks: ChangeTicksMut<'w>> Mut<'w, T, Ticks> {
         self.ticks.set_this_run(this_run);
     }
 
+    #[inline]
     pub fn into_ticks_type<NewTicks>(self) -> Mut<'w, T, NewTicks>
     where
         Ticks: Into<NewTicks>,

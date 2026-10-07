@@ -441,6 +441,7 @@ impl<'w> ChangeTicksMut<'w> for ComponentTicksMutDynamic<'w> {
     }
 }
 impl<'w> From<ComponentTicksMutDynamic<'w>> for ComponentTicksRef<'w> {
+    #[inline]
     fn from(value: ComponentTicksMutDynamic<'w>) -> Self {
         if let ComponentTicksMutDynamic {
             refs:
@@ -467,6 +468,7 @@ impl<'w> From<ComponentTicksMutDynamic<'w>> for ComponentTicksRef<'w> {
     }
 }
 impl<'w> From<ComponentTicksMutDynamic<'w>> for ComponentTicksMut<'w> {
+    #[inline]
     fn from(value: ComponentTicksMutDynamic<'w>) -> Self {
         if value.summary_tick.is_none()
             && let ComponentTicksMutDynamic {
