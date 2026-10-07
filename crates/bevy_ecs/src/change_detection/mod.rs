@@ -392,5 +392,12 @@ mod tests {
         assert_eq!(2, into_mut.last_changed().get());
         assert_eq!(3, into_mut.ticks.last_run.get());
         assert_eq!(4, into_mut.ticks.this_run.get());
+
+        // SAFETY: `into_mut` came from a `Mut<C>`.
+        let retyped = unsafe { into_mut.with_component::<C>() };
+        assert_eq!(1, retyped.added().get());
+        assert_eq!(2, retyped.last_changed().get());
+        assert_eq!(3, retyped.ticks.last_run.get());
+        assert_eq!(4, retyped.ticks.this_run.get());
     }
 }

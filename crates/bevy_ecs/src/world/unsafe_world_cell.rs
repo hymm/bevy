@@ -574,7 +574,9 @@ impl<'w> UnsafeWorldCell<'w> {
     /// - the [`UnsafeWorldCell`] has permission to access the resource mutably
     /// - no other references to the resource exist at the same time
     #[inline]
-    pub unsafe fn get_resource_mut<R: Resource<Mutability = Mutable>>(self) -> Option<Mut<'w, R>> {
+    pub unsafe fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+        self,
+    ) -> Option<Mut<'w, R, R::ChangeTicks<'w>>> {
         self.assert_allows_mutable_access();
         let component_id = self.components().get_valid_id(TypeId::of::<R>())?;
         // SAFETY:
@@ -583,7 +585,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.get_resource_mut_by_id(component_id)
                 // `component_id` was gotten from `TypeId::of::<R>()`
-                .map(|ptr| ptr.with_type::<R>().into_ticks_type())
+                .map(|ptr| ptr.with_component::<R>())
         }
     }
 
@@ -617,7 +619,9 @@ impl<'w> UnsafeWorldCell<'w> {
     /// - no other references to the resource exist at the same time
     /// - the resource `R` is mutable
     #[inline]
-    pub unsafe fn get_resource_mut_assume_mutable<R: Resource>(self) -> Option<Mut<'w, R>> {
+    pub unsafe fn get_resource_mut_assume_mutable<R: Resource>(
+        self,
+    ) -> Option<Mut<'w, R, R::ChangeTicks<'w>>> {
         let component_id = self.components().get_valid_id(TypeId::of::<R>())?;
         // SAFETY:
         // - caller ensures `self` has permission to access the resource mutably
@@ -626,7 +630,7 @@ impl<'w> UnsafeWorldCell<'w> {
         unsafe {
             self.get_resource_mut_by_id(component_id)
                 // `component_id` was gotten from `TypeId::of::<R>()`
-                .map(|ptr| ptr.with_type::<R>().into_ticks_type())
+                .map(|ptr| ptr.with_component::<R>())
         }
     }
 

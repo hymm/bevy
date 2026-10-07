@@ -78,7 +78,9 @@ impl<'a, 'w> TemplateContext<'a, 'w> {
 
     /// Retrieves a mutable reference to the given resource `R`.
     #[inline]
-    pub fn resource_mut<R: Resource<Mutability = Mutable>>(&mut self) -> Mut<'_, R> {
+    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Mut<'_, R, R::ChangeTicks<'_>> {
         self.entity.resource_mut()
     }
 

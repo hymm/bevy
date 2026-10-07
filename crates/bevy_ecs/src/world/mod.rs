@@ -2325,7 +2325,9 @@ impl World {
     /// use [`get_resource_or_insert_with`](World::get_resource_or_insert_with).
     #[inline]
     #[track_caller]
-    pub fn resource_mut<R: Resource<Mutability = Mutable>>(&mut self) -> Mut<'_, R> {
+    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Mut<'_, R, R::ChangeTicks<'_>> {
         match self.get_resource_mut() {
             Some(x) => x,
             None => panic!(
@@ -2358,7 +2360,9 @@ impl World {
 
     /// Gets a mutable reference to the resource of the given type if it exists
     #[inline]
-    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(&mut self) -> Option<Mut<'_, R>> {
+    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Option<Mut<'_, R, R::ChangeTicks<'_>>> {
         // SAFETY:
         // - `as_unsafe_world_cell` gives permission to access everything mutably
         // - `&mut self` ensures nothing in world is borrowed
@@ -2385,7 +2389,7 @@ impl World {
     pub fn get_resource_or_insert_with<R: Resource<Mutability = Mutable>>(
         &mut self,
         func: impl FnOnce() -> R,
-    ) -> Mut<'_, R> {
+    ) -> Mut<'_, R, R::ChangeTicks<'_>> {
         let caller = MaybeLocation::caller();
         let (resource_id, entity) =
             self.insert_resource_if_not_exists_with_caller(|_world: &mut World| func(), caller);
@@ -2393,7 +2397,7 @@ impl World {
             .into_mut_by_id(resource_id)
             .expect("Resource must exist");
         // SAFETY: resource is of type R
-        unsafe { untyped.with_type::<R>().into_ticks_type() }
+        unsafe { untyped.with_component::<R>() }
     }
 
     /// Gets a mutable reference to the resource of type `T` if it exists,
@@ -2431,7 +2435,7 @@ impl World {
     #[track_caller]
     pub fn get_resource_or_init<R: Resource<Mutability = Mutable> + FromWorld>(
         &mut self,
-    ) -> Mut<'_, R> {
+    ) -> Mut<'_, R, R::ChangeTicks<'_>> {
         let caller = MaybeLocation::caller();
         let (resource_id, entity) =
             self.insert_resource_if_not_exists_with_caller(R::from_world, caller);
@@ -2439,7 +2443,7 @@ impl World {
             .into_mut_by_id(resource_id)
             .expect("Resource must exist");
         // SAFETY: resource is of type R
-        unsafe { untyped.with_type::<R>().into_ticks_type() }
+        unsafe { untyped.with_component::<R>() }
     }
 
     /// Retrieves the [`Entity`] associated with the resource of type `R`, if it exists.

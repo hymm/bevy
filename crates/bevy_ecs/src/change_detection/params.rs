@@ -1,9 +1,11 @@
 use crate::{
     change_detection::{
-        component_ticks::ComponentTicksMutDynamic, traits::*, AtomicTick, ChangeTicksMut,
-        ComponentTickCells, ComponentTicksMut, ComponentTicksMutSumm, MaybeLocation, Tick,
+        component_ticks::{ComponentTicksMutDynamic, TickRefs},
+        traits::*,
+        AtomicTick, ChangeTicksMut, ComponentTickCells, ComponentTicksMut, ComponentTicksMutSumm,
+        MaybeLocation, Tick,
     },
-    component::Mutable,
+    component::{Component, Mutable},
     ptr::PtrMut,
     resource::Resource,
 };
@@ -1659,6 +1661,41 @@ impl<'w> MutUntyped<'w> {
             // SAFETY: `value` is `Aligned` and caller ensures the pointee type is `T`.
             value: unsafe { self.value.deref_mut() },
             ticks: self.ticks,
+        }
+    }
+
+    /// Transforms this [`MutUntyped`] into a [`Mut<T>`] with the component's `T::ChangeTicks` type.
+    ///
+    /// # Safety
+    /// - `T` must be the erased pointee type for this [`MutUntyped`].
+    /// - Its ticks must be present and compatible with `T::ChangeTicks`.
+    pub unsafe fn with_component<T: Component>(self) -> Mut<'w, T, T::ChangeTicks<'w>> {
+        let MutUntyped { value, ticks } = self;
+
+        // Safety: Caller garuntees that the dynamic ticks will have Ticks
+        unsafe { core::hint::assert_unchecked(matches!(&ticks.refs, TickRefs::Ticks { .. })) };
+
+        let TickRefs::Ticks {
+            added,
+            changed,
+            changed_by,
+        } = ticks.refs
+        else {
+            // SAFETY: The assertion above establishes that this is unreachable.
+            unsafe { core::hint::unreachable_unchecked() }
+        };
+
+        Mut {
+            // SAFETY: The caller guarantees `value` points to a `T`.
+            value: unsafe { value.deref_mut() },
+            ticks: T::ChangeTicks::new(
+                added,
+                changed,
+                ticks.summary_tick,
+                ticks.last_run,
+                ticks.this_run,
+                changed_by,
+            ),
         }
     }
 }
