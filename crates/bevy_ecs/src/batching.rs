@@ -50,7 +50,7 @@ impl BatchingStrategy {
     pub const fn new() -> Self {
         Self {
             batch_size_limits: 1..usize::MAX,
-            batches_per_thread: 1,
+            batches_per_thread: 4,
         }
     }
 
@@ -58,7 +58,7 @@ impl BatchingStrategy {
     pub const fn fixed(batch_size: usize) -> Self {
         Self {
             batch_size_limits: batch_size..batch_size,
-            batches_per_thread: 1,
+            batches_per_thread: 4,
         }
     }
 
