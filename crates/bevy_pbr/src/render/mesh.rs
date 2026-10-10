@@ -17,6 +17,7 @@ use bevy_core_pipeline::{
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_diagnostic::FrameCount;
+use bevy_ecs::batching::BatchingStrategy;
 use bevy_ecs::entity::EntityHash;
 use bevy_ecs::{
     entity::EntityHashSet,
@@ -2071,25 +2072,28 @@ pub fn extract_meshes_for_gpu_building(
 
     // Find all meshes that have changed, and record information needed to
     // construct the `MeshInputUniform` for them.
-    changed_meshes_query.par_iter().for_each_init(
-        || render_mesh_instance_queues.borrow_local_mut(),
-        |queue, query_row| {
-            extract_mesh_for_gpu_building(
-                query_row,
-                &render_visibility_ranges,
-                render_mesh_instances,
-                queue,
-                any_gpu_culling,
-            );
+    changed_meshes_query
+        .par_iter()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(1000))
+        .for_each_init(
+            || render_mesh_instance_queues.borrow_local_mut(),
+            |queue, query_row| {
+                extract_mesh_for_gpu_building(
+                    query_row,
+                    &render_visibility_ranges,
+                    render_mesh_instances,
+                    queue,
+                    any_gpu_culling,
+                );
 
-            // If this entity was in the potential reextraction set, set the
-            // appropriate bit.
-            if let Some(bit_index) = potential_reextraction_set.get_index_of(&query_row.0) {
-                potential_reextraction_bitfield[bit_index / 64]
-                    .fetch_or(1 << (bit_index % 64), Ordering::Relaxed);
-            }
-        },
-    );
+                // If this entity was in the potential reextraction set, set the
+                // appropriate bit.
+                if let Some(bit_index) = potential_reextraction_set.get_index_of(&query_row.0) {
+                    potential_reextraction_bitfield[bit_index / 64]
+                        .fetch_or(1 << (bit_index % 64), Ordering::Relaxed);
+                }
+            },
+        );
 
     // Add the entities in the potential reextraction set to the
     // `reextract_entities` list, unless we saw them in the query above.

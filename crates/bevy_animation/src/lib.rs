@@ -39,7 +39,9 @@ use crate::{
 
 use bevy_app::{AnimationSystems, App, Plugin, PostUpdate};
 use bevy_asset::{Asset, AssetApp, AssetEventSystems, Assets};
-use bevy_ecs::{prelude::*, resource::IsResource, world::EntityMutExcept};
+use bevy_ecs::{
+    batching::BatchingStrategy, prelude::*, resource::IsResource, world::EntityMutExcept,
+};
 use bevy_math::FloatOrd;
 use bevy_platform::{collections::HashMap, hash::NoOpHash};
 use bevy_reflect::{prelude::ReflectDefault, Reflect, TypePath};
@@ -1053,6 +1055,7 @@ pub fn advance_animations(
     let delta_seconds = time.delta_secs();
     players
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(50))
         .for_each(|(mut player, graph_handle)| {
             let Some(animation_graph) = animation_graphs.get(graph_handle) else {
                 return;
@@ -1110,6 +1113,7 @@ pub fn animate_targets(
     // Evaluate all animation targets in parallel.
     targets
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(25))
         .for_each(|(entity, &target_id, &AnimatedBy(player_id), entity_mut)| {
             let (animation_player, animation_graph_id) =
                 if let Ok((player, graph_handle)) = players.get(player_id) {

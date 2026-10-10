@@ -3,6 +3,8 @@ use crate::{
     helper::TransformHelper,
 };
 
+#[cfg(feature = "multi_threaded")]
+use bevy_ecs::batching::BatchingStrategy;
 use bevy_ecs::{prelude::*, query::QueryFilter};
 
 /// Generic system that propagates transforms,
@@ -58,6 +60,7 @@ pub fn sync_simple_transforms(
     query
         .p0()
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
         .for_each(|(transform, mut global_transform)| {
             *global_transform = GlobalTransform::from(*transform);
         });
@@ -266,18 +269,23 @@ pub fn mark_dirty_trees(
             // feeding it work as soon as possible. The traversal worker should skip sending these
             // leaves to the consumer because it has already been sent here.
             let mut producer = move || {
+                use bevy_ecs::batching::BatchingStrategy;
+
                 for entity in orphaned.read() {
                     let _ = traversal_tx.send_blocking(entity);
                     let _ = consumer_tx.send_blocking(entity);
                 }
                 // Changed<> table scans are slow, so we parallelize them to improve performance.
-                changed.par_iter().for_each_init(
-                    || (traversal_tx.clone(), consumer_tx.clone()),
-                    |(traversal_tx, consumer_tx), entity| {
-                        let _ = traversal_tx.send_blocking(entity);
-                        let _ = consumer_tx.send_blocking(entity);
-                    },
-                );
+                changed
+                    .par_iter()
+                    .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
+                    .for_each_init(
+                        || (traversal_tx.clone(), consumer_tx.clone()),
+                        |(traversal_tx, consumer_tx), entity| {
+                            let _ = traversal_tx.send_blocking(entity);
+                            let _ = consumer_tx.send_blocking(entity);
+                        },
+                    );
             };
             #[cfg(feature = "trace")]
             info_span!("producer_mark_dirty").in_scope(&mut producer);
@@ -488,7 +496,10 @@ mod parallel {
     // TODO: this implementation could be used in no_std if there are equivalents of these.
     use crate::systems::StaticTransformOptimizations;
     use alloc::{sync::Arc, vec::Vec};
-    use bevy_ecs::{entity::UniqueEntitySlice, prelude::*, system::lifetimeless::Read};
+    use bevy_ecs::{
+        batching::BatchingStrategy, entity::UniqueEntitySlice, prelude::*,
+        system::lifetimeless::Read,
+    };
     use bevy_tasks::{ComputeTaskPool, TaskPool};
     use bevy_utils::Parallel;
     use core::sync::atomic::{AtomicI32, Ordering};
@@ -519,40 +530,43 @@ mod parallel {
         static_optimizations: Res<StaticTransformOptimizations>,
     ) {
         // Process roots in parallel, seeding the work queue
-        roots.par_iter_mut().for_each_init(
-            || queue.local_queue.borrow_local_mut(),
-            |outbox, (parent, transform, mut parent_transform, children, transform_tree)| {
-                if static_optimizations.is_enabled() && !transform_tree.is_changed() {
-                    // Early exit if the subtree is static and the optimization is enabled.
-                    return;
-                }
+        roots
+            .par_iter_mut()
+            .batching_strategy(BatchingStrategy::default().min_batch_size(100))
+            .for_each_init(
+                || queue.local_queue.borrow_local_mut(),
+                |outbox, (parent, transform, mut parent_transform, children, transform_tree)| {
+                    if static_optimizations.is_enabled() && !transform_tree.is_changed() {
+                        // Early exit if the subtree is static and the optimization is enabled.
+                        return;
+                    }
 
-                *parent_transform = GlobalTransform::from(*transform);
+                    *parent_transform = GlobalTransform::from(*transform);
 
-                // SAFETY: the parent entities passed into this function are taken from iterating
-                // over the root entity query. Queries iterate over disjoint entities, preventing
-                // mutable aliasing, and making this call safe.
-                #[expect(unsafe_code, reason = "Mutating disjoint entities in parallel")]
-                unsafe {
-                    propagate_descendants_unchecked(
-                        parent,
-                        parent_transform,
-                        children,
-                        &nodes,
-                        outbox,
-                        &queue,
-                        &static_optimizations,
-                        // Need to revisit this single-max-depth by profiling more representative
-                        // scenes. It's possible that it is actually beneficial to go deep into the
-                        // hierarchy to build up a good task queue before starting the workers.
-                        // However, we avoid this for now to prevent cases where only a single
-                        // thread is going deep into the hierarchy while the others sit idle, which
-                        // is the problem that the tasks sharing workers already solve.
-                        1,
-                    );
-                }
-            },
-        );
+                    // SAFETY: the parent entities passed into this function are taken from iterating
+                    // over the root entity query. Queries iterate over disjoint entities, preventing
+                    // mutable aliasing, and making this call safe.
+                    #[expect(unsafe_code, reason = "Mutating disjoint entities in parallel")]
+                    unsafe {
+                        propagate_descendants_unchecked(
+                            parent,
+                            parent_transform,
+                            children,
+                            &nodes,
+                            outbox,
+                            &queue,
+                            &static_optimizations,
+                            // Need to revisit this single-max-depth by profiling more representative
+                            // scenes. It's possible that it is actually beneficial to go deep into the
+                            // hierarchy to build up a good task queue before starting the workers.
+                            // However, we avoid this for now to prevent cases where only a single
+                            // thread is going deep into the hierarchy while the others sit idle, which
+                            // is the problem that the tasks sharing workers already solve.
+                            1,
+                        );
+                    }
+                },
+            );
         // Send all tasks in thread local outboxes *after* roots are processed to reduce the total
         // number of channel sends by avoiding sending partial batches.
         queue.send_batches();

@@ -32,6 +32,7 @@ mod render_layers;
 
 use core::any::TypeId;
 
+use bevy_ecs::batching::BatchingStrategy;
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::world::DeferredWorld;
@@ -584,6 +585,7 @@ pub fn calculate_bounds(
 
     update_aabb
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
         .for_each(|(mesh_handle, mut old_aabb)| {
             if let Some(aabb) = meshes.get(mesh_handle).and_then(MeshAabb::get_aabb) {
                 *old_aabb = aabb;
@@ -604,6 +606,7 @@ fn update_skinned_mesh_bounds(
 ) {
     mesh_entities
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(25))
         .for_each(|(mut aabb, mesh, skinned_mesh, world_from_entity)| {
             if let Some(inverse_bindposes_asset) =
                 inverse_bindposes_assets.get(&skinned_mesh.inverse_bindposes)
@@ -731,9 +734,12 @@ fn propagate_recursive(
 /// Track entities that were visible last frame, used to granularly update
 /// [`ViewVisibility`] this frame without spurious `Change` detecation.
 fn reset_view_visibility(mut reset_query: Query<&mut ViewVisibility, Without<NoCpuCulling>>) {
-    reset_query.par_iter_mut().for_each(|mut view_visibility| {
-        view_visibility.bypass_change_detection().update();
-    });
+    reset_query
+        .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(8000))
+        .for_each(|mut view_visibility| {
+            view_visibility.bypass_change_detection().update();
+        });
 }
 
 /// System updating the visibility of entities, other than those that have opted
@@ -783,80 +789,83 @@ pub fn check_visibility_cpu_culling(
 
         let view_mask = maybe_view_mask.unwrap_or_default();
 
-        visible_aabb_query.par_iter_mut().for_each_init(
-            || thread_queues.borrow_local_mut(),
-            |queue, query_item| {
-                let (
-                    entity,
-                    inherited_visibility,
-                    mut view_visibility,
-                    visibility_class,
-                    maybe_entity_mask,
-                    maybe_model_aabb,
-                    maybe_model_sphere,
-                    transform,
-                    no_frustum_culling,
-                    has_visibility_range,
-                ) = query_item;
+        visible_aabb_query
+            .par_iter_mut()
+            .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
+            .for_each_init(
+                || thread_queues.borrow_local_mut(),
+                |queue, query_item| {
+                    let (
+                        entity,
+                        inherited_visibility,
+                        mut view_visibility,
+                        visibility_class,
+                        maybe_entity_mask,
+                        maybe_model_aabb,
+                        maybe_model_sphere,
+                        transform,
+                        no_frustum_culling,
+                        has_visibility_range,
+                    ) = query_item;
 
-                // Skip computing visibility for entities that are configured to be hidden.
-                // ViewVisibility has already been reset in `reset_view_visibility`.
-                if !inherited_visibility.get() {
-                    return;
-                }
-
-                let entity_mask = maybe_entity_mask.unwrap_or_default();
-                if !view_mask.intersects(entity_mask) {
-                    return;
-                }
-
-                // If outside of the visibility range, cull.
-                if has_visibility_range
-                    && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
-                        !visible_entity_ranges.entity_is_in_range_of_view(entity, view)
-                    })
-                {
-                    return;
-                }
-
-                // If we have an aabb or a bounding sphere, do frustum culling
-                if !no_frustum_culling && !no_cpu_culling_camera {
-                    if let Some(model_aabb) = maybe_model_aabb {
-                        let world_from_local = transform.affine();
-                        let model_sphere = Sphere {
-                            center: world_from_local.transform_point3a(model_aabb.center),
-                            radius: transform.radius_vec3a(model_aabb.half_extents),
-                        };
-                        // Do quick sphere-based frustum culling
-                        if !frustum.intersects_sphere(&model_sphere, false) {
-                            return;
-                        }
-                        // Do aabb-based frustum culling
-                        if !frustum.intersects_obb(model_aabb, &world_from_local, true, false) {
-                            return;
-                        }
-                    } else if let Some(model_sphere) = maybe_model_sphere
-                        && !frustum.intersects_sphere(model_sphere, false)
-                    {
-                        // Do sphere-based frustum culling in this case
+                    // Skip computing visibility for entities that are configured to be hidden.
+                    // ViewVisibility has already been reset in `reset_view_visibility`.
+                    if !inherited_visibility.get() {
                         return;
                     }
-                }
 
-                view_visibility.set_visible();
-
-                // The visibility class may be None here because AABB gizmos can be enabled via
-                // config without a renderable component being added to the entity. This workaround
-                // allows view visibility to be set for entities without a renderable component, but
-                // still need to render gizmos.
-                if let Some(visibility_class) = visibility_class {
-                    // Add the entity to the queue for all visibility classes the entity is in.
-                    for visibility_class_id in visibility_class.iter() {
-                        queue.entry(*visibility_class_id).or_default().push(entity);
+                    let entity_mask = maybe_entity_mask.unwrap_or_default();
+                    if !view_mask.intersects(entity_mask) {
+                        return;
                     }
-                }
-            },
-        );
+
+                    // If outside of the visibility range, cull.
+                    if has_visibility_range
+                        && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
+                            !visible_entity_ranges.entity_is_in_range_of_view(entity, view)
+                        })
+                    {
+                        return;
+                    }
+
+                    // If we have an aabb or a bounding sphere, do frustum culling
+                    if !no_frustum_culling && !no_cpu_culling_camera {
+                        if let Some(model_aabb) = maybe_model_aabb {
+                            let world_from_local = transform.affine();
+                            let model_sphere = Sphere {
+                                center: world_from_local.transform_point3a(model_aabb.center),
+                                radius: transform.radius_vec3a(model_aabb.half_extents),
+                            };
+                            // Do quick sphere-based frustum culling
+                            if !frustum.intersects_sphere(&model_sphere, false) {
+                                return;
+                            }
+                            // Do aabb-based frustum culling
+                            if !frustum.intersects_obb(model_aabb, &world_from_local, true, false) {
+                                return;
+                            }
+                        } else if let Some(model_sphere) = maybe_model_sphere
+                            && !frustum.intersects_sphere(model_sphere, false)
+                        {
+                            // Do sphere-based frustum culling in this case
+                            return;
+                        }
+                    }
+
+                    view_visibility.set_visible();
+
+                    // The visibility class may be None here because AABB gizmos can be enabled via
+                    // config without a renderable component being added to the entity. This workaround
+                    // allows view visibility to be set for entities without a renderable component, but
+                    // still need to render gizmos.
+                    if let Some(visibility_class) = visibility_class {
+                        // Add the entity to the queue for all visibility classes the entity is in.
+                        for visibility_class_id in visibility_class.iter() {
+                            queue.entry(*visibility_class_id).or_default().push(entity);
+                        }
+                    }
+                },
+            );
 
         visible_entities.clear_all();
 
@@ -910,6 +919,7 @@ fn mark_newly_hidden_entities_invisible(
 ) {
     view_visibilities
         .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(8000))
         .for_each(|mut view_visibility| {
             if view_visibility.as_ref().was_visible_now_hidden() {
                 *view_visibility = ViewVisibility::HIDDEN;

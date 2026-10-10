@@ -15,7 +15,7 @@ use bevy_camera::{
     },
     Camera, Camera3d, CameraUpdateSystems, RenderTarget, ShadowLodOrigin,
 };
-use bevy_ecs::{entity::EntityHashSet, prelude::*, system::QueryLens};
+use bevy_ecs::{batching::BatchingStrategy, entity::EntityHashSet, prelude::*, system::QueryLens};
 #[cfg(feature = "bevy_gizmos")]
 use bevy_gizmos::frustum::FrustumGizmoSystems;
 use bevy_log::warn_once;
@@ -413,68 +413,77 @@ pub fn check_dir_light_mesh_visibility(
                 thread_queue.resize(view_frusta.len(), Vec::default());
             }
 
-            visible_entity_query.par_iter().for_each_init(
-                || {
-                    let mut entities = view_visible_entities_queue.borrow_local_mut();
-                    entities.resize(view_frusta.len(), Vec::default());
-                    (defer_visible_entities_queue.borrow_local_mut(), entities)
-                },
-                |(defer_visible_entities_local_queue, view_visible_entities_local_queue),
-                 (
-                    entity,
-                    inherited_visibility,
-                    maybe_entity_mask,
-                    maybe_aabb,
-                    maybe_transform,
-                    has_visibility_range,
-                    has_no_frustum_culling,
-                )| {
-                    if !inherited_visibility.get() {
-                        return;
-                    }
+            visible_entity_query
+                .par_iter()
+                .batching_strategy(BatchingStrategy::new().min_batch_size(500))
+                .for_each_init(
+                    || {
+                        let mut entities = view_visible_entities_queue.borrow_local_mut();
+                        entities.resize(view_frusta.len(), Vec::default());
+                        (defer_visible_entities_queue.borrow_local_mut(), entities)
+                    },
+                    |(defer_visible_entities_local_queue, view_visible_entities_local_queue),
+                     (
+                        entity,
+                        inherited_visibility,
+                        maybe_entity_mask,
+                        maybe_aabb,
+                        maybe_transform,
+                        has_visibility_range,
+                        has_no_frustum_culling,
+                    )| {
+                        if !inherited_visibility.get() {
+                            return;
+                        }
 
-                    let entity_mask = maybe_entity_mask.unwrap_or_default();
-                    if !view_mask.intersects(entity_mask) {
-                        return;
-                    }
+                        let entity_mask = maybe_entity_mask.unwrap_or_default();
+                        if !view_mask.intersects(entity_mask) {
+                            return;
+                        }
 
-                    // Check visibility ranges.
-                    if has_visibility_range
-                        && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
-                            !visible_entity_ranges.entity_is_in_range_of_view(entity, *view)
-                        })
-                    {
-                        return;
-                    }
-
-                    if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
-                        let mut visible = false;
-                        for (frustum, frustum_visible_entities) in view_frusta
-                            .iter()
-                            .zip(view_visible_entities_local_queue.iter_mut())
+                        // Check visibility ranges.
+                        if has_visibility_range
+                            && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
+                                !visible_entity_ranges.entity_is_in_range_of_view(entity, *view)
+                            })
                         {
-                            // Disable near-plane culling, as a shadow caster could lie before the near plane.
-                            if !has_no_frustum_culling
-                                && !frustum.intersects_obb(aabb, &transform.affine(), false, true)
+                            return;
+                        }
+
+                        if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
+                            let mut visible = false;
+                            for (frustum, frustum_visible_entities) in view_frusta
+                                .iter()
+                                .zip(view_visible_entities_local_queue.iter_mut())
                             {
-                                continue;
-                            }
-                            visible = true;
+                                // Disable near-plane culling, as a shadow caster could lie before the near plane.
+                                if !has_no_frustum_culling
+                                    && !frustum.intersects_obb(
+                                        aabb,
+                                        &transform.affine(),
+                                        false,
+                                        true,
+                                    )
+                                {
+                                    continue;
+                                }
+                                visible = true;
 
-                            frustum_visible_entities.push(entity);
-                        }
-                        if visible {
+                                frustum_visible_entities.push(entity);
+                            }
+                            if visible {
+                                defer_visible_entities_local_queue.push(entity);
+                            }
+                        } else {
                             defer_visible_entities_local_queue.push(entity);
+                            for frustum_visible_entities in
+                                view_visible_entities_local_queue.iter_mut()
+                            {
+                                frustum_visible_entities.push(entity);
+                            }
                         }
-                    } else {
-                        defer_visible_entities_local_queue.push(entity);
-                        for frustum_visible_entities in view_visible_entities_local_queue.iter_mut()
-                        {
-                            frustum_visible_entities.push(entity);
-                        }
-                    }
-                },
-            );
+                    },
+                );
             // collect entities from parallel queue
             for (view_dest_index, view_dest) in visible_entities
                 .entities

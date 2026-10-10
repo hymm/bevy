@@ -12,6 +12,7 @@ use bevy_core_pipeline::{
     tonemapping::Tonemapping,
 };
 use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::batching::BatchingStrategy;
 use bevy_ecs::change_detection::Tick;
 use bevy_ecs::system::SystemParam;
 use bevy_ecs::{
@@ -740,9 +741,12 @@ fn mark_meshes_as_changed_if_their_materials_changed<M>(
 ) where
     M: Material,
 {
-    changed_meshes_query.par_iter_mut().for_each(|mut mesh| {
-        mesh.set_changed();
-    });
+    changed_meshes_query
+        .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
+        .for_each(|mut mesh| {
+            mesh.set_changed();
+        });
 }
 
 /// Fills the [`RenderMaterialInstances`] resources from the meshes in the
@@ -935,6 +939,7 @@ pub fn check_entities_needing_specialization<M>(
     // Gather all entities that need their specializations regenerated.
     needs_specialization
         .par_iter()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
         .for_each(|entity| par_local.borrow_local_mut().push(entity));
     par_local.drain_into(&mut entities_needing_specialization.changed);
 

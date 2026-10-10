@@ -16,6 +16,7 @@ use bevy_asset::{embedded_asset, load_embedded_asset, AssetServer, Handle};
 use bevy_camera::{Camera, Camera3d, MainPassResolutionOverride};
 use bevy_core_pipeline::{core_3d::CORE_3D_DEPTH_FORMAT, deferred::*, prepass::*};
 use bevy_ecs::{
+    batching::BatchingStrategy,
     prelude::*,
     system::{
         lifetimeless::{Read, SRes},
@@ -241,11 +242,14 @@ pub fn update_mesh_previous_global_transforms(
         let new_previous_transform = PreviousGlobalTransform(transform.affine());
         commands.entity(entity).try_insert(new_previous_transform);
     }
-    meshes.par_iter_mut().for_each(|(transform, mut previous)| {
-        if transform.is_changed_after(previous.last_changed()) {
-            *previous = PreviousGlobalTransform(transform.affine());
-        }
-    });
+    meshes
+        .par_iter_mut()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(2000))
+        .for_each(|(transform, mut previous)| {
+            if transform.is_changed_after(previous.last_changed()) {
+                *previous = PreviousGlobalTransform(transform.affine());
+            }
+        });
 }
 
 #[derive(Resource, Clone)]

@@ -8,6 +8,7 @@ use core::{
 
 use bevy_app::{App, Plugin, PostUpdate};
 use bevy_ecs::{
+    batching::BatchingStrategy,
     component::Component,
     entity::{Entity, EntityHashMap},
     query::{Or, With, Without},
@@ -253,32 +254,36 @@ pub fn check_visibility_ranges(
 
     // Check each entity/view pair. Only consider entities with
     // [`VisibilityRange`] components.
-    entity_query.par_iter().for_each(
-        |(entity, entity_transform, maybe_model_aabb, visibility_range)| {
-            let mut visibility = 0;
-            for (view_index, &(_, view_position)) in views.iter().enumerate() {
-                // If instructed to use the AABB and the model has one, use its
-                // center as the model position. Otherwise, use the model's
-                // translation.
-                let model_position = match (visibility_range.use_aabb, maybe_model_aabb) {
-                    (true, Some(model_aabb)) => entity_transform
-                        .affine()
-                        .transform_point3a(model_aabb.center),
-                    _ => entity_transform.translation_vec3a(),
-                };
+    entity_query
+        .par_iter()
+        .batching_strategy(BatchingStrategy::default().min_batch_size(500))
+        .for_each(
+            |(entity, entity_transform, maybe_model_aabb, visibility_range)| {
+                let mut visibility = 0;
+                for (view_index, &(_, view_position)) in views.iter().enumerate() {
+                    // If instructed to use the AABB and the model has one, use its
+                    // center as the model position. Otherwise, use the model's
+                    // translation.
+                    let model_position = match (visibility_range.use_aabb, maybe_model_aabb) {
+                        (true, Some(model_aabb)) => entity_transform
+                            .affine()
+                            .transform_point3a(model_aabb.center),
+                        _ => entity_transform.translation_vec3a(),
+                    };
 
-                if visibility_range.is_visible_at_all((view_position - model_position).length()) {
-                    visibility |= 1 << view_index;
+                    if visibility_range.is_visible_at_all((view_position - model_position).length())
+                    {
+                        visibility |= 1 << view_index;
+                    }
                 }
-            }
 
-            // Invisible entities have no entry at all in the hash map. This speeds
-            // up checks slightly in this common case.
-            if visibility != 0 {
-                par_local.borrow_local_mut().push((entity, visibility));
-            }
-        },
-    );
+                // Invisible entities have no entry at all in the hash map. This speeds
+                // up checks slightly in this common case.
+                if visibility != 0 {
+                    par_local.borrow_local_mut().push((entity, visibility));
+                }
+            },
+        );
 
     visible_entity_ranges.entities.extend(par_local.drain());
 }
