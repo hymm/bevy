@@ -532,7 +532,7 @@ mod parallel {
         // Process roots in parallel, seeding the work queue
         roots
             .par_iter_mut()
-            .batching_strategy(BatchingStrategy::default().min_batch_size(100))
+            .batching_strategy(BatchingStrategy::default().min_batch_size(500))
             .for_each_init(
                 || queue.local_queue.borrow_local_mut(),
                 |outbox, (parent, transform, mut parent_transform, children, transform_tree)| {

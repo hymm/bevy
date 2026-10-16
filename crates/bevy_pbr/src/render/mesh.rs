@@ -2074,7 +2074,7 @@ pub fn extract_meshes_for_gpu_building(
     // construct the `MeshInputUniform` for them.
     changed_meshes_query
         .par_iter()
-        .batching_strategy(BatchingStrategy::default().min_batch_size(1000))
+        .batching_strategy(BatchingStrategy::default().min_batch_size(250))
         .for_each_init(
             || render_mesh_instance_queues.borrow_local_mut(),
             |queue, query_row| {

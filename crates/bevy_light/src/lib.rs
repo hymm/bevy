@@ -415,7 +415,7 @@ pub fn check_dir_light_mesh_visibility(
 
             visible_entity_query
                 .par_iter()
-                .batching_strategy(BatchingStrategy::new().min_batch_size(500))
+                .batching_strategy(BatchingStrategy::new().min_batch_size(250))
                 .for_each_init(
                     || {
                         let mut entities = view_visible_entities_queue.borrow_local_mut();
